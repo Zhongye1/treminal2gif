@@ -1,0 +1,37 @@
+{
+  "name": "treminal2gif",
+  "version": "1.0.0",
+  "description": "Cross-platform terminal recording tool that captures terminal sessions and converts them to animated GIFs",
+  "main": "src/index.js",
+  "bin": {
+    "treminal2gif": "./bin/cli.js"
+  },
+  "scripts": {
+    "start": "node bin/cli.js",
+    "test": "node bin/cli.js --help",
+    "record": "node bin/cli.js record",
+    "edit": "node bin/cli.js edit",
+    "render": "node bin/cli.js render",
+    "list": "node bin/cli.js list"
+  },
+  "keywords": [
+    "terminal",
+    "gif",
+    "recording",
+    "cli",
+    "asciinema",
+    "screencast"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "node-pty": "^1.0.0",
+    "commander": "^11.0.0",
+    "chalk": "^5.3.0",
+    "canvas": "^2.11.2",
+    "gifencoder": "^2.0.1"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
