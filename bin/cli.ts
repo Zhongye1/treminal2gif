@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * treminal2gif CLI 入口
+ * terminal2gif CLI 入口
  * 终端录制转 GIF 工具
  */
 
@@ -9,8 +9,13 @@ import { Command } from 'commander';
 import * as path from 'path';
 import * as fs from 'fs';
 
-// 使用 require 正确导入 chalk
-const chalk = require('chalk');
+// 延迟加载 chalk 模块
+let chalk: any;
+
+async function initializeChalk() {
+  const chalkModule = await import('chalk');
+  chalk = chalkModule.default;
+}
 
 import { defaultConfig, getRecordingPath, themes } from '../src/config';
 import { printWelcome, printRecordingInfo, recordingExists, loadRecording } from '../src';
@@ -25,7 +30,7 @@ import { isPtyAvailable, recordCommands, recordInteractive } from '../src/record
 
 const program = new Command();
 program
-  .name('treminal2gif')
+  .name('terminal2gif')
   .description('跨平台终端录制工具，将终端会话转换为动画 GIF')
   .version(packageJson.version);
 
@@ -50,6 +55,9 @@ program
       }
     ) => {
       try {
+        // 初始化 chalk
+        await initializeChalk();
+
         // 检查 PTY 是否可用
         if (!isPtyAvailable()) {
           console.error(chalk.red('错误: node-pty 未正确安装，无法进行录制'));
@@ -92,7 +100,49 @@ program
 
         console.log(chalk.green('\n录制完成!'));
         printRecordingInfo(recording);
-        console.log(chalk.gray('\n使用 "treminal2gif render ' + sessionName + '" 生成 GIF'));
+
+        // 自动渲染 GIF
+        console.log(chalk.cyan('\n开始渲染 GIF...'));
+        const outputPath = path.join('.', `${sessionName}.gif`);
+
+        // 延迟加载 renderer 模块
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const Renderer = require('../src/renderer').Renderer;
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const isCanvasAvailable = require('../src/renderer').isCanvasAvailable;
+
+        // 检查 canvas 是否可用
+        if (!isCanvasAvailable()) {
+          console.error(chalk.red('错误: skia-canvas 模块未正确安装，无法进行渲染'));
+          console.log(chalk.yellow('\n请运行: npm install skia-canvas'));
+          console.log(chalk.gray('skia-canvas 是 node-canvas 的现代替代品，无需额外的系统依赖。'));
+          console.log(chalk.gray(`\n使用 "terminal2gif render ${sessionName}" 单独渲染`));
+          process.exit(1);
+        }
+
+        const renderer = new Renderer({});
+        renderer.load(recordingPath);
+
+        // 渲染进度
+        let lastProgress = 0;
+
+        const result = await renderer.render(outputPath, {
+          onProgress: (current: number, total: number) => {
+            const progress = Math.floor((current / total) * 100);
+            if (progress > lastProgress) {
+              process.stdout.write(`\r渲染进度: ${progress}% (${current}/${total} 帧)`);
+              lastProgress = progress;
+            }
+          },
+        });
+
+        console.log(chalk.green('\n\n渲染完成!'));
+        console.log(chalk.gray(`输出文件: ${result}`));
+
+        // 显示文件大小
+        const stats = fs.statSync(result);
+        const sizeMB = (stats.size / 1024 / 1024).toFixed(2);
+        console.log(chalk.gray(`文件大小: ${sizeMB} MB`));
       } catch (error) {
         console.error(chalk.red('录制失败:'), (error as Error).message);
         process.exit(1);
@@ -115,7 +165,7 @@ program
   .option('-i, --info', '显示录制信息')
   .option('-l, --list [count]', '列出帧', parseInt)
   .action(
-    (
+    async (
       sessionName: string,
       options: {
         delay?: number;
@@ -131,6 +181,9 @@ program
       }
     ) => {
       try {
+        // 初始化 chalk
+        await initializeChalk();
+
         // 延迟加载 editor 模块
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         const Editor = require('../src/editor').Editor;
@@ -258,6 +311,9 @@ program
       }
     ) => {
       try {
+        // 初始化 chalk
+        await initializeChalk();
+
         // 延迟加载 renderer 模块
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         const Renderer = require('../src/renderer').Renderer;
@@ -334,8 +390,11 @@ program
   .command('list')
   .description('列出所有录制')
   .option('-d, --detailed', '显示详细信息')
-  .action((options: { detailed?: boolean }) => {
+  .action(async (options: { detailed?: boolean }) => {
     try {
+      // 初始化 chalk
+      await initializeChalk();
+
       const recordingsDir = defaultConfig.storage.recordingsDir;
 
       if (!fs.existsSync(recordingsDir)) {
@@ -384,7 +443,10 @@ program
   .command('config')
   .description('显示当前配置')
   .option('--themes', '列出可用主题')
-  .action((options: { themes?: boolean }) => {
+  .action(async (options: { themes?: boolean }) => {
+    // 初始化 chalk
+    await initializeChalk();
+
     console.log(chalk.cyan('\n当前配置:'));
 
     if (options.themes) {
@@ -416,8 +478,11 @@ program
   .command('delete <session-name>')
   .description('删除录制')
   .option('-f, --force', '强制删除，不询问确认')
-  .action((sessionName: string) => {
+  .action(async (sessionName: string) => {
     try {
+      // 初始化 chalk
+      await initializeChalk();
+
       const recordingPath = getRecordingPath(sessionName);
 
       if (!recordingExists(recordingPath)) {
@@ -438,6 +503,10 @@ program.parse(process.argv);
 
 // 如果没有参数，显示帮助
 if (process.argv.length === 2) {
-  printWelcome();
-  program.help();
+  // 初始化 chalk 并显示欢迎信息
+  (async () => {
+    await initializeChalk();
+    printWelcome();
+    program.help();
+  })();
 }

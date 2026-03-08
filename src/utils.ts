@@ -4,7 +4,15 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { Frame, RecordingData, RecordingDataV2, OutputEvent, TerminalEvent, AnsiStyle, AnsiSegment } from './types';
+import {
+  Frame,
+  RecordingData,
+  RecordingDataV2,
+  OutputEvent,
+  TerminalEvent,
+  AnsiStyle,
+  AnsiSegment,
+} from './types';
 import { defaultConfig } from './config';
 import { VirtualTerminal } from './virtualTerminal';
 
@@ -140,7 +148,7 @@ export function convertV1ToV2(v1: RecordingData): RecordingDataV2 {
     if (frame.data) {
       events.push({
         ts: frame.timestamp,
-        type: 'output',  // 添加类型字段
+        type: 'output', // 添加类型字段
         data: frame.data,
       });
     }
@@ -166,7 +174,7 @@ export function convertV1ToV2(v1: RecordingData): RecordingDataV2 {
  * @deprecated 使用 eventsToFramesSmart 替代
  */
 export function eventsToFrames(
-  events: TerminalEvent[],  // 改为 TerminalEvent[] 以支持新格式
+  events: TerminalEvent[], // 改为 TerminalEvent[] 以支持新格式
   cols: number,
   rows: number,
   options: {
@@ -183,7 +191,7 @@ export function eventsToFrames(
   for (let i = 0; i < events.length; i++) {
     const event = events[i];
     if (!event) continue;
-    
+
     // 只处理 output 事件
     if (event.type === 'output') {
       vt.feed(event.data);
@@ -220,7 +228,7 @@ export function eventsToFrames(
  * 支持多种事件类型（output, resize, cursor 等）
  */
 export function eventsToFramesSmart(
-  events: TerminalEvent[],  // 支持所有事件类型
+  events: TerminalEvent[], // 支持所有事件类型
   cols: number,
   rows: number,
   options: {
@@ -270,7 +278,11 @@ export function eventsToFramesSmart(
     const timeSinceLastFrame = event.ts - lastFrameTs;
 
     // 条件：内容变化 或 超过最大间隔
-    if (currentContent !== lastContent || timeSinceLastFrame >= maxFrameInterval || i === events.length - 1) {
+    if (
+      currentContent !== lastContent ||
+      timeSinceLastFrame >= maxFrameInterval ||
+      i === events.length - 1
+    ) {
       frames.push({
         timestamp: event.ts,
         content: currentContent,
@@ -300,7 +312,7 @@ export function parseAnsi(text: string): AnsiSegment[] {
   const segments: AnsiSegment[] = [];
   let lastIndex = 0;
   let match: RegExpExecArray | null;
-  
+
   const defaultStyle: AnsiStyle = {
     bold: false,
     dim: false,
@@ -378,7 +390,7 @@ export function parseAnsi(text: string): AnsiSegment[] {
 
   // 移除所有 ANSI 控制序列和其他控制字符
   // 包括：CSI 序列 (\x1b[...), OSC 序列 (\x1b]...), 其他转义
-  const cleanSegments = segments.map((seg) => ({
+  const cleanSegments = segments.map(seg => ({
     ...seg,
     text: seg.text
       // 移除 CSI 序列 (大部分终端控制)
@@ -435,12 +447,12 @@ export function calculateDelays(frames: Frame[]): Frame[] {
 export function optimizeFrames(frames: Frame[], maxIdleTime: number = 2000): Frame[] {
   if (frames.length === 0) return frames;
 
-  const result: Frame[] = [frames[0]!];
+  const result: Frame[] = [frames[0]];
   let accumulatedDelay = 0;
 
   for (let i = 1; i < frames.length; i++) {
-    const prevFrame = frames[i - 1]!;
-    const currentFrame = frames[i]!;
+    const prevFrame = frames[i - 1];
+    const currentFrame = frames[i];
     const delay = currentFrame.timestamp - prevFrame.timestamp;
 
     // 如果内容相同且延迟不超过最大空闲时间，合并
@@ -459,7 +471,7 @@ export function optimizeFrames(frames: Frame[], maxIdleTime: number = 2000): Fra
 
   // 处理第一帧的延迟
   if (result.length > 0) {
-    result[0]!.delay = frames[0]?.delay || 0;
+    result[0].delay = frames[0]?.delay || 0;
   }
 
   return result;
@@ -469,7 +481,7 @@ export function optimizeFrames(frames: Frame[], maxIdleTime: number = 2000): Fra
  * 延迟函数
  */
 export function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 /**
@@ -496,8 +508,8 @@ export function printWelcome(): void {
  * 打印录制信息
  */
 export function printRecordingInfo(recording: RecordingData | RecordingDataV2): void {
-  console.log('\n录制信息:');
-  
+  // console.log('\n录制信息:');
+
   // 根据版本提取信息
   if ((recording as RecordingDataV2).version === 2) {
     const v2 = recording as RecordingDataV2;
