@@ -13,6 +13,8 @@ import { getConfig, getOutputPath, getRecordingPath } from './config';
 import { loadRecordingAny, parseAnsi, ensureDir, eventsToFramesSmart } from './utils';
 
 // @napi-rs/canvas 类型定义
+import sharp from 'sharp';
+
 type CanvasTextAlign = 'left' | 'right' | 'center' | 'start' | 'end';
 type CanvasTextBaseline = 'top' | 'hanging' | 'middle' | 'alphabetic' | 'ideographic' | 'bottom';
 
@@ -348,10 +350,10 @@ class Renderer {
       showWindowTitle,
       windowTitle,
     } = this.options.rendering;
-    const colors: ColorScheme = {
-      ...this.options.colors,
-      ...this._recording.config?.colors,
-    };
+
+    // 确保背景色始终有效（关键修复）
+    const backgroundColor =
+      this._recording.config?.colors?.background || this.options.colors.background || '#000000'; // 默认黑色背景
 
     // 绘制阴影
     if (shadowBlur > 0) {
@@ -361,8 +363,15 @@ class Renderer {
       this._ctx.shadowOffsetY = 5;
     }
 
-    // 绘制主背景
-    this._ctx.fillStyle = colors.background || this.options.colors.background;
+    // 绘制主背景（使用确保有效的背景色）
+    // console.log(
+    //   '[BG] drawWindowBackground - color:',
+    //   backgroundColor,
+    //   'size:',
+    //   `${width}x${height}`
+    // );
+    this._ctx.fillStyle = backgroundColor;
+    // console.log('[BG] After setting fillStyle:', this._ctx.fillStyle);
     this.roundRect(0, 0, width, height, borderRadius, true, false);
 
     // 重置阴影
@@ -426,6 +435,9 @@ class Renderer {
     stroke: boolean
   ): void {
     if (!this._ctx) return;
+
+    // console.log('[PATH] roundRect - params:', { x, y, w, h, radius, fill, stroke });
+
     this._ctx.beginPath();
     this._ctx.moveTo(x + radius, y);
     this._ctx.lineTo(x + w - radius, y);
@@ -437,7 +449,11 @@ class Renderer {
     this._ctx.lineTo(x, y + radius);
     this._ctx.quadraticCurveTo(x, y, x + radius, y);
     this._ctx.closePath();
-    if (fill) this._ctx.fill();
+
+    if (fill) {
+      // console.log('[PATH] Filling roundRect');
+      this._ctx.fill();
+    }
     if (stroke) this._ctx.stroke();
   }
 
@@ -472,6 +488,21 @@ class Renderer {
     if (!this._ctx || !this._recording) return;
 
     const { padding, titleBarHeight, showWindowTitle } = this.options.rendering;
+
+    // 确保背景色始终有效（关键修复）
+    const backgroundColor =
+      this._recording.config?.colors?.background || this.options.colors.background || '#000000'; // 默认黑色背景
+
+    // // DEBUG: 输出终端内容调试信息
+    // console.log('[DEBUG] drawTerminalContent:', {
+    //   backgroundColor,
+    //   contentLength: content.length,
+    //   linesCount: content.split('\n').length,
+    //   hasCtx: !!this._ctx,
+    //   hasRecording: !!this._recording,
+    //   recordingConfig: this._recording.config,
+    // });
+
     const colors: ColorScheme = {
       ...this.options.colors,
       ...this._recording.config?.colors,
@@ -487,11 +518,17 @@ class Renderer {
     const charWidth = this.getCharWidth();
     const { cols, rows } = this.getRecordingSize();
 
-    // 清空终端区域
+    // 用背景色重绘整个区域，清除上一帧的内容
     const terminalWidth = charWidth * cols;
-    const terminalHeight = lineHeight * rows;
-    this._ctx.fillStyle = colors.background || this.options.colors.background;
-    this._ctx.fillRect(offsetX, offsetY, terminalWidth, terminalHeight);
+    // console.log('[BG] drawTerminalContent - color:', backgroundColor, 'rows:', rows);
+
+    // 分行绘制，每行都先填充背景色
+    for (let row = 0; row < rows; row++) {
+      const y = offsetY + row * lineHeight;
+      // 填充行的背景（使用确保有效的背景色）
+      this._ctx.fillStyle = backgroundColor;
+      this._ctx.fillRect(offsetX, y, terminalWidth, lineHeight);
+    }
 
     // 分行处理
     const lines = content.split('\n');
@@ -583,6 +620,8 @@ class Renderer {
     const width = this._canvas?.width || 0;
     const height = this._canvas?.height || 0;
 
+    // console.log('[FRAME] renderFrame - canvas cleared?', !!this._canvas);
+
     // 绘制背景
     this.drawWindowBackground(width, height);
 
@@ -630,12 +669,39 @@ class Renderer {
         frameDelays.push(Math.round(delay));
 
         // 渲染帧
+        // console.log(`\n[FRAME] ========== Rendering frame ${i + 1}/${frames.length} ==========`);
         this.renderFrame(frame);
 
         // 保存为 PNG（@napi-rs/canvas 使用 encode 方法）
         const framePath = path.join(tempDir, `frame_${i.toString().padStart(6, '0')}.png`);
+
+        // 关键修复：移除 alpha 通道，生成纯 RGB PNG
+        // node-canvas 默认生成 RGBA PNG，会导致 FFmpeg 调色板处理时出现透明问题
         const buffer = await this._canvas!.encode('png');
-        fs.writeFileSync(framePath, buffer);
+
+        // 使用 sharp 移除 alpha 通道（如果安装了 sharp）
+        try {
+          const rgbBuffer = await sharp(buffer)
+            .removeAlpha() // 移除 alpha 通道
+            .png({ compressionLevel: 6 }) // 重新压缩为 PNG
+            .toBuffer();
+          fs.writeFileSync(framePath, rgbBuffer);
+        } catch {
+          // 如果没有 sharp，直接使用原始 buffer（可能仍有 alpha 问题）
+          fs.writeFileSync(framePath, buffer);
+          if (i === 0) {
+            console.warn('[WARN] sharp 未安装，建议安装以获得更好的 GIF 质量：npm install sharp');
+          }
+        }
+
+        // 检查 PNG 文件大小
+        // const stats = fs.statSync(framePath);
+        // console.log(`[PNG] Frame ${i + 1} saved: ${(stats.size / 1024).toFixed(2)} KB`);
+
+        // 如果是前几帧和最后一帧，输出更多信息
+        // if (i < 3 || i === frames.length - 1) {
+        //   console.log(`[PNG] File: ${framePath}`);
+        // }
 
         // 进度回调
         if (options.onProgress) {
@@ -644,7 +710,12 @@ class Renderer {
       }
 
       // 使用 ffmpeg 合成 GIF
+      console.log('[FFMPEG] Starting GIF generation...');
       this.renderWithFfmpeg(tempDir, outputPath, frameDelays, frameRate);
+
+      // 检查生成的 GIF 文件
+      const gifStats = fs.statSync(outputPath);
+      console.log(`[GIF] Generated: ${(gifStats.size / 1024 / 1024).toFixed(2)} MB`);
 
       return outputPath;
     } finally {
@@ -682,20 +753,28 @@ class Renderer {
     // 使用 palette 方式获得更高质量的 GIF
 
     // 生成调色板
-    const paletteCmd = `"${ffmpegPath}" -y -f concat -safe 0 -i "frames.txt" -vf "palettegen=stats_mode=full" "palette.png"`;
+    console.log('[FFMPEG] Generating palette...');
+    const paletteCmd = `"${ffmpegPath}" -y -f concat -safe 0 -i "frames.txt" -vf "palettegen=stats_mode=full" -frames:v 1 "palette.png"`;
     try {
-      execSync(paletteCmd, { cwd: tempDir, stdio: 'inherit' });
+      execSync(paletteCmd, { cwd: tempDir, stdio: 'pipe' });
+
+      // 检查调色板文件
+      if (fs.existsSync(path.join(tempDir, 'palette.png'))) {
+        const paletteStats = fs.statSync(path.join(tempDir, 'palette.png'));
+        console.log(`[PALETTE] Generated: ${(paletteStats.size / 1024).toFixed(2)} KB`);
+      }
     } catch (error) {
-      throw new Error(`ffmpeg 调色板生成失败: ${error}`);
+      throw new Error(`ffmpeg 调色板生成失败：${error}`);
     }
 
     // 使用调色板生成 GIF（使用绝对路径）
+    console.log('[FFMPEG] Generating GIF with palette...');
     const absOutputPath = path.resolve(outputPath);
     const gifCmd = `"${ffmpegPath}" -y -f concat -safe 0 -i "frames.txt" -i "palette.png" -lavfi "paletteuse=dither=bayer:bayer_scale=5" "${absOutputPath}"`;
     try {
-      execSync(gifCmd, { cwd: tempDir, stdio: 'inherit' });
+      execSync(gifCmd, { cwd: tempDir, stdio: 'pipe' });
     } catch (error) {
-      throw new Error(`ffmpeg GIF 生成失败: ${error}`);
+      throw new Error(`ffmpeg GIF 生成失败：${error}`);
     }
   }
 

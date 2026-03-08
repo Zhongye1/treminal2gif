@@ -4,7 +4,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { Frame, RecordingData, RecordingDataV2, OutputEvent, AnsiStyle, AnsiSegment } from './types';
+import { Frame, RecordingData, RecordingDataV2, OutputEvent, TerminalEvent, AnsiStyle, AnsiSegment } from './types';
 import { defaultConfig } from './config';
 import { VirtualTerminal } from './virtualTerminal';
 
@@ -110,8 +110,8 @@ export function detectRecordingVersion(filePath: string): 1 | 2 {
  * V2 转 V1 格式
  */
 export function convertV2ToV1(v2: RecordingDataV2): RecordingData {
-  // 使用虚拟终端重建帧
-  const frames = eventsToFrames(v2.events, v2.meta.cols, v2.meta.rows);
+  // 使用虚拟终端重建帧（使用智能版本）
+  const frames = eventsToFramesSmart(v2.events, v2.meta.cols, v2.meta.rows);
 
   return {
     name: v2.meta.title,
@@ -132,7 +132,7 @@ export function convertV2ToV1(v2: RecordingDataV2): RecordingData {
  * V1 转 V2 格式
  */
 export function convertV1ToV2(v1: RecordingData): RecordingDataV2 {
-  // 从 V1 帧中提取事件
+  // 从 V1 帧中提取事件（转换为新的 OutputEvent 格式）
   const events: OutputEvent[] = [];
   let lastTs = 0;
 
@@ -140,6 +140,7 @@ export function convertV1ToV2(v1: RecordingData): RecordingDataV2 {
     if (frame.data) {
       events.push({
         ts: frame.timestamp,
+        type: 'output',  // 添加类型字段
         data: frame.data,
       });
     }
@@ -161,11 +162,11 @@ export function convertV1ToV2(v1: RecordingData): RecordingDataV2 {
 }
 
 /**
- * 事件流转帧序列
- * 使用虚拟终端模拟器重建每一帧
+ * 事件流转帧序列（基础版本，仅处理 output 事件）
+ * @deprecated 使用 eventsToFramesSmart 替代
  */
 export function eventsToFrames(
-  events: OutputEvent[],
+  events: TerminalEvent[],  // 改为 TerminalEvent[] 以支持新格式
   cols: number,
   rows: number,
   options: {
@@ -182,7 +183,11 @@ export function eventsToFrames(
   for (let i = 0; i < events.length; i++) {
     const event = events[i];
     if (!event) continue;
-    vt.feed(event.data);
+    
+    // 只处理 output 事件
+    if (event.type === 'output') {
+      vt.feed(event.data);
+    }
 
     // 只在足够时间间隔后记录帧
     if (event.ts - lastFrameTs >= minFrameInterval || i === events.length - 1) {
@@ -212,9 +217,10 @@ export function eventsToFrames(
 /**
  * 智能事件流转帧序列
  * 只在内容变化时记录帧
+ * 支持多种事件类型（output, resize, cursor 等）
  */
 export function eventsToFramesSmart(
-  events: OutputEvent[],
+  events: TerminalEvent[],  // 支持所有事件类型
   cols: number,
   rows: number,
   options: {
@@ -232,7 +238,33 @@ export function eventsToFramesSmart(
   for (let i = 0; i < events.length; i++) {
     const event = events[i];
     if (!event) continue;
-    vt.feed(event.data);
+
+    // 根据事件类型处理
+    switch (event.type) {
+      case 'output':
+        // 输出事件：馈送到虚拟终端
+        vt.feed(event.data);
+        break;
+
+      case 'resize':
+        // 尺寸变化事件：调整虚拟终端大小
+        {
+          const [newCols, newRows] = event.data;
+          vt.resize(newCols, newRows);
+        }
+        break;
+
+      case 'cursor':
+        // 光标事件：目前由虚拟终端自动处理，这里可以扩展
+        // TODO: 实现光标显示/隐藏/样式变化的显式控制
+        break;
+
+      case 'input':
+      case 'title':
+      case 'theme':
+        // 这些事件暂时不处理，可以扩展功能
+        break;
+    }
 
     const currentContent = vt.getSnapshot();
     const timeSinceLastFrame = event.ts - lastFrameTs;

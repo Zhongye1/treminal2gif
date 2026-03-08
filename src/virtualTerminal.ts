@@ -838,8 +838,9 @@ export class VirtualTerminal {
       for (let x = 0; x < this.state.cols; x++) {
         line += row[x]?.char || ' ';
       }
-      // 移除尾部空格
-      lines.push(line.trimEnd());
+      // 保留行尾空格，因为终端可能在这些位置有内容
+      // 只移除最后的换行符和完全空白的行（除了第一行）
+      lines.push(line);
     }
 
     return lines.join('\n');

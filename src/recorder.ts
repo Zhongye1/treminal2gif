@@ -6,7 +6,14 @@
 
 import * as pty from 'node-pty';
 import * as os from 'os';
-import { RecordingDataV2, OutputEvent, Config } from './types';
+import {
+  RecordingDataV2,
+  OutputEvent,
+  TerminalEvent,
+  InputEvent,
+  ResizeEvent,
+  Config,
+} from './types';
 import { getConfig, getRecordingPath } from './config';
 import { saveRecording, getTerminalSize, delay } from './utils';
 
@@ -15,7 +22,7 @@ import { saveRecording, getTerminalSize, delay } from './utils';
  */
 class Recorder {
   private options: Config;
-  private events: OutputEvent[];
+  private events: TerminalEvent[]; // 支持多种事件类型
   private startTime: number;
   private ptyProcess: pty.IPty | null;
   private sessionName: string | null;
@@ -106,6 +113,7 @@ class Recorder {
 
     const event: OutputEvent = {
       ts,
+      type: 'output',
       data,
     };
 
@@ -117,11 +125,45 @@ class Recorder {
   }
 
   /**
-   * 发送输入到终端
+   * 记录输入事件（可选）
+   */
+  private recordInput(data: string): void {
+    const ts = Date.now() - this.startTime;
+
+    const event: InputEvent = {
+      ts,
+      type: 'input',
+      data,
+    };
+
+    this.events.push(event);
+  }
+
+  /**
+   * 记录尺寸变化事件
+   */
+  private recordResize(cols: number, rows: number): void {
+    const ts = Date.now() - this.startTime;
+
+    const event: ResizeEvent = {
+      ts,
+      type: 'resize',
+      data: [cols, rows],
+    };
+
+    this.events.push(event);
+  }
+
+  /**
+   * 发送输入到终端（并记录输入事件）
    */
   write(data: string | Buffer): void {
     if (this.ptyProcess && this._isRecording) {
-      this.ptyProcess.write(data.toString());
+      const str = data.toString();
+      this.ptyProcess.write(str);
+
+      // 记录输入事件
+      this.recordInput(str);
     }
   }
 
@@ -133,6 +175,9 @@ class Recorder {
       this.ptyProcess.resize(cols, rows);
       this.cols = cols;
       this.rows = rows;
+
+      // 记录尺寸变化事件
+      this.recordResize(cols, rows);
     }
   }
 

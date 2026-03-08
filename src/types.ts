@@ -171,26 +171,118 @@ export type Themes = Record<ThemeName, ColorScheme>;
 
 // ============ V2 格式：事件流 ============
 
-// 输出事件（记录原始终端输出）
-export interface OutputEvent {
+/**
+ * 事件类型枚举
+ */
+export type TerminalEventType =
+  | 'output'   // 终端输出 (stdout/stderr)
+  | 'input'    // 用户输入（按键）
+  | 'resize'   // 终端尺寸变化
+  | 'cursor'   // 光标控制（显示/隐藏/样式）
+  | 'title'    // 窗口标题变化
+  | 'theme'    // 主题/颜色变化
+  | 'wait';    // 显式等待（人为插入延迟）
+
+/**
+ * 基础事件接口
+ */
+export interface BaseEvent {
   /** 时间戳（毫秒，相对于录制开始） */
   ts: number;
+  /** 事件类型 */
+  type: TerminalEventType;
+}
+
+/**
+ * 输出事件（记录原始终端输出）
+ */
+export interface OutputEvent extends BaseEvent {
+  type: 'output';
   /** 原始输出数据（含 ANSI 转义序列） */
   data: string;
 }
 
-// 录制元数据
+/**
+ * 输入事件（记录用户按键，可选）
+ */
+export interface InputEvent extends BaseEvent {
+  type: 'input';
+  /** 按键内容 */
+  data: string;
+}
+
+/**
+ * 尺寸变化事件
+ */
+export interface ResizeEvent extends BaseEvent {
+  type: 'resize';
+  /** [列数，行数] */
+  data: [number, number];
+}
+
+/**
+ * 光标事件
+ */
+export interface CursorEvent extends BaseEvent {
+  type: 'cursor';
+  /** 光标状态 */
+  data: 'show' | 'hide' | 'block' | 'underline' | 'bar';
+}
+
+/**
+ * 标题事件
+ */
+export interface TitleEvent extends BaseEvent {
+  type: 'title';
+  /** 新标题 */
+  data: string;
+}
+
+/**
+ * 主题事件
+ */
+export interface ThemeEvent extends BaseEvent {
+  type: 'theme';
+  /** 颜色配置 */
+  data: Partial<ColorScheme>;
+}
+
+/**
+ * 联合事件类型
+ */
+export type TerminalEvent =
+  | OutputEvent
+  | InputEvent
+  | ResizeEvent
+  | CursorEvent
+  | TitleEvent
+  | ThemeEvent;
+
+// 录制元数据（增强版）
 export interface RecordingMeta {
   title: string;
   cols: number;
   rows: number;
   duration: number;
   createdAt: number;
-  shell?: string;
-  env?: Record<string, string>;
+  
+  // 可选扩展字段
+  shell?: string;                        // 使用的 shell
+  env?: Record<string, string>;          // 环境变量 (TERM, SHELL 等)
+  theme?: {                              // 颜色主题配置
+    fg: string;
+    bg: string;
+    palette: string[];
+  };
+  fontFamily?: string;                   // 默认字体
+  fontSize?: number;                     // 默认字号
+  lineHeight?: number;                   // 行高倍数
+  defaultFrameDelayMs?: number;          // 默认帧间隔（可被事件覆盖）
+  cursorStyle?: 'block' | 'underline' | 'bar'; // 光标样式
+  loop?: boolean;                        // GIF 是否循环
 }
 
-// V2 录制格式（事件流）
+// V2 录制格式（事件流 - 支持多种事件类型）
 export interface RecordingDataV2 {
   version: 2;
   meta: RecordingMeta;
@@ -199,8 +291,8 @@ export interface RecordingDataV2 {
     fontFamily?: string;
     colors?: Partial<ColorScheme>;
   };
-  /** 事件流：只记录原始输出 */
-  events: OutputEvent[];
+  /** 事件流：支持输出、输入、控制等多种事件 */
+  events: TerminalEvent[];
 }
 
 // 统一录制数据类型（支持 V1 和 V2）
