@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * treminal2gif CLI 入口
+ * terminal2gif CLI 入口
  * 终端录制转 GIF 工具
  */
 
@@ -25,7 +25,7 @@ import { isPtyAvailable, recordCommands, recordInteractive } from '../src/record
 
 const program = new Command();
 program
-  .name('treminal2gif')
+  .name('terminal2gif')
   .description('跨平台终端录制工具，将终端会话转换为动画 GIF')
   .version(packageJson.version);
 

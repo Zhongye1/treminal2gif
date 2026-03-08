@@ -1,11 +1,11 @@
 {
   "name": "terminal2gif",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Cross-platform terminal recording tool that captures terminal sessions and converts them to animated GIFs",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "treminal2gif": "./bin/cli-wrapper.js"
+    "terminal2gif": "./bin/cli-wrapper.js"
   },
   "scripts": {
     "start": "ts-node bin/cli.ts",
