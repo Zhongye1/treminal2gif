@@ -1,24 +1,53 @@
-# treminal2gif - 终端录制转 GIF 工具
+# treminal2gif - 终端录制转 GIF
 
-`terminal2gif` 是一个跨平台的终端录制工具，可以将终端会话录制并转换为动画 GIF，非常适合创建演示、教程或分享代码片段。
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D16.0.0-green?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![npm](https://img.shields.io/npm/v/terminal2gif?logo=npm)](https://www.npmjs.com/package/terminal2gif)
+[![Commander.js](https://img.shields.io/badge/Commander.js-red?logo=javascript&logoColor=white)](https://github.com/tj/commander.js)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://www.npmjs.com/package/terminal2gif)
 
-## 功能特性
+`terminal2gif` 是一个跨平台的终端录制工具，可以将终端会话录制并转换为动画 GIF，可用于创建演示、教程或分享
+
 
 - **跨平台支持**: 支持 Windows、macOS 和 Linux
 - **终端录制**: 交互式录制或命令序列录制
-- **主题支持**: 内置多种终端主题（默认、Dracula、Monokai、Solarized Dark 等）
 - **编辑功能**: 编辑录制内容，调整延迟、帧范围等
-- **高质量渲染**: 生成高质量的 GIF 动画
-- **自定义配置**: 可自定义终端尺寸、字体、颜色等
+- **主题支持**: 内置多种终端主题（默认、Dracula、Monokai、Solarized Dark 等）（TODO）
+
 
 ## 安装
 
-### 系统要求
-
 - Node.js >= 16.0.0
-- Windows 用户需要安装 GTK 运行时环境（用于 canvas 模块）
 
-### 安装步骤
+### 方法一：全局安装（推荐）
+
+```bash
+npm install terminal2gif -g
+```
+
+安装完成后，可以直接使用 `terminal2gif` 命令：
+
+```bash
+$ terminal2gif
+Usage: terminal2gif [options] [command]
+
+跨平台终端录制工具，将终端会话转换为动画 GIF
+
+Options:
+  -V, --version                    output the version number
+  -h, --help                       display help for command
+
+Commands:
+  record [options] <session-name>  录制终端会话
+  edit [options] <session-name>    编辑录制内容
+  render [options] <session-name>  将录制渲染为 GIF
+  list [options]                   列出所有录制
+  config [options]                 显示当前配置
+  delete [options] <session-name>  删除录制
+  help [command]                   display help for command
+```
+
+### 方法二：源码安装
 
 1. 克隆或下载项目
 ```bash
@@ -26,14 +55,15 @@ git clone <repository-url>
 cd treminal2gif
 ```
 
-2. 安装依赖（使用npm）
+2. 安装依赖（使用 npm）
 ```bash
 npm install
 ```
 
-3. Windows 用户额外安装 GTK
-   - 下载并安装 GTK: https://github.com/tschoonj/GTK-for-Windows-Runtime-Environment-Installer
-   - 安装完成后，运行: `npm rebuild canvas`
+3. 通过 npm 脚本运行
+```bash
+npm start -- <command> [options]
+```
 
 ## 快速开始
 
@@ -41,14 +71,16 @@ npm install
 
 ```bash
 # 开始交互式录制
-npm run start record my-session
+terminal2gif record my-session
 
 # 指定终端尺寸
-npm run start record my-session --cols 100 --rows 30
+terminal2gif record my-session --cols 100 --rows 30
 
 # 录制特定命令
-npm run start record my-session --exec "ls -la && pwd"
+terminal2gif record my-session --exec "ls -la && pwd"
 ```
+
+> 如果使用源码开发，请将 `terminal2gif` 替换为 `npm start --`。
 
 录制完成后，按 `Ctrl+D` 或 `Ctrl+C` 结束录制。
 
@@ -56,60 +88,60 @@ npm run start record my-session --exec "ls -la && pwd"
 
 ```bash
 # 显示录制信息
-npm run start edit my-session --info
+terminal2gif edit my-session --info
 
 # 设置所有帧的延迟
-npm run start edit my-session --delay 100
+terminal2gif edit my-session --delay 100
 
 # 更改主题
-npm run start edit my-session --theme dracula
+terminal2gif edit my-session --theme dracula
 
 # 优化帧序列（移除空闲时间）
-npm run start edit my-session --optimize
+terminal2gif edit my-session --optimize
 
 # 保留特定帧范围
-npm run start edit my-session --keep 0-100
+terminal2gif edit my-session --keep 0-100
 
 # 删除特定帧范围
-npm run start edit my-session --delete 50-60
+terminal2gif edit my-session --delete 50-60
 ```
 
 ### 3. 渲染为 GIF
 
 ```bash
 # 渲染为 GIF
-npm run start render my-session
+terminal2gif render my-session
 
 # 指定输出路径
-npm run start render my-session --output ./output.gif
+terminal2gif render my-session --output ./output.gif
 
 # 设置帧率
-npm run start render my-session --fps 30
+terminal2gif render my-session --fps 30
 
 # 预览渲染（仅估算）
-npm run start render my-session --estimate
+terminal2gif render my-session --estimate
 ```
 
 ### 4. 其他命令
 
 ```bash
 # 列出所有录制
-npm run start list
+terminal2gif list
 
 # 显示详细信息
-npm run start list --detailed
+terminal2gif list --detailed
 
 # 显示当前配置
-npm run start config
+terminal2gif config
 
 # 列出可用主题
-npm run start config --themes
+terminal2gif config --themes
 
 # 删除录制
-npm run start delete my-session
+terminal2gif delete my-session
 ```
 
-## 命令详解
+## 命令
 
 ### record 命令
 
@@ -166,43 +198,71 @@ npm run start delete my-session
 - solarizedDark: Solarized Dark 配色主题
 - oneHalfDark: One Half Dark 配色主题
 
-## 开发
+## 开发与构建
+
+### 开发环境设置
+
+```bash
+# 克隆项目
+git clone <repository-url>
+cd treminal2gif
+
+# 安装所有依赖
+npm install
+```
+
+### 开发模式
+
+```bash
+# 使用 ts-node 直接运行源代码（无需编译）
+npm start -- record my-session
+
+# 监听模式开发（自动重新编译）
+npm run dev
+```
 
 ### 构建项目
 
 ```bash
+# 编译 TypeScript 到 JavaScript
 npm run build
+
 ```
 
-### 运行测试
+编译输出目录为 `bin/`，包含编译后的 JS 文件和类型声明文件。
+
+
+### 本地测试全局安装
 
 ```bash
-npm test
+# 本地链接包（模拟全局安装）
+npm link
+
+# 测试 CLI 命令
+terminal2gif --version
+terminal2gif --help
+
+# 取消链接
+npm unlink
 ```
 
-### 脚本命令
+### 发布打包
 
-- `npm start`: 运行 CLI 工具
-- `npm run build`: 编译 TypeScript
-- `npm test`: 运行测试
-- `npm run record`: 快速录制
-- `npm run edit`: 快速编辑
-- `npm run render`: 快速渲染
-- `npm run list`: 快速列出录制
-- `npm run config`: 快速显示配置
+```bash
+# 构建项目
+npm run build
 
-## 常见问题
+# 生成 npm 包（创建 .tgz 文件）
+npm pack
 
-1. **Canvas 模块错误**: Windows 用户需要安装 GTK 运行时环境并运行 `npm rebuild canvas`。
+# 全局安装本地包进行测试
+npm install -g ./terminal2gif-*.tgz
 
-2. **node-pty 错误**: 运行 `npm rebuild node-pty`。
+# 验证安装
+terminal2gif --version
+```
 
-3. **录制文件过大**: 可以通过编辑工具优化帧序列或调整渲染质量。
 
 ## 贡献
 
 欢迎提交问题和拉取请求！
-
-## 许可证
-
-ISC
