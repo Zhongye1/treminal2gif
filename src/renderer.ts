@@ -1,6 +1,6 @@
 /**
  * GIF 渲染模块
- * 使用 skia-canvas 绘制终端帧，并通过 ffmpeg 导出 GIF
+ * 使用 @napi-rs/canvas 绘制终端帧，并通过 ffmpeg 导出 GIF
  */
 
 import * as fs from 'fs';
@@ -11,12 +11,7 @@ import { Frame, Config, RecordingData, ColorScheme, SizeEstimate } from './types
 import { getConfig, getOutputPath } from './config';
 import { loadRecording, parseAnsi, ensureDir } from './utils';
 
-// 延迟加载 canvas
-let canvasModule: {
-  createCanvas: (width: number, height: number) => unknown;
-} | null = null;
-
-// 定义 Canvas 相关类型（canvas 模块没有官方类型定义）
+// @napi-rs/canvas 类型定义
 type CanvasTextAlign = 'left' | 'right' | 'center' | 'start' | 'end';
 type CanvasTextBaseline = 'top' | 'hanging' | 'middle' | 'alphabetic' | 'ideographic' | 'bottom';
 
@@ -49,22 +44,70 @@ interface Canvas {
   height: number;
   getContext(type: string): CanvasRenderingContext2D | null;
   toBuffer(format: string): Buffer;
+  encode(format: string): Promise<Buffer>;
 }
 
-function getCanvas(): typeof canvasModule {
+interface CanvasModule {
+  createCanvas: (width: number, height: number) => Canvas;
+  GlobalFonts: {
+    registerFromPath(path: string, name?: string): boolean;
+    has(name: string): boolean;
+    families: { family: string }[];
+  };
+}
+
+let canvasModule: CanvasModule | null = null;
+let fontRegistered = false;
+
+function getCanvas(): CanvasModule {
   if (!canvasModule) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      canvasModule = require('skia-canvas');
+      canvasModule = require('@napi-rs/canvas');
     } catch {
       throw new Error(
-        'skia-canvas 模块未正确安装。\n' +
-        '请运行: npm install skia-canvas\n\n' +
-        'skia-canvas 是 node-canvas 的现代替代品，使用 Skia 引擎，无需额外的系统依赖。'
+        '@napi-rs/canvas 模块未正确安装。\n' +
+        '请运行: npm install @napi-rs/canvas\n\n' +
+        '@napi-rs/canvas 是基于 Skia 的高性能 Canvas 库，预编译二进制，无需额外依赖。'
       );
     }
   }
-  return canvasModule;
+  return canvasModule!;
+}
+
+/**
+ * 注册等宽字体
+ */
+function registerFonts(): void {
+  if (fontRegistered) return;
+  
+  const { GlobalFonts } = getCanvas();
+  
+  // Windows 系统等宽字体路径
+  const fontPaths = [
+    'C:\\Windows\\Fonts\\consola.ttf',      // Consolas
+    'C:\\Windows\\Fonts\\cour.ttf',         // Courier New
+    'C:\\Windows\\Fonts\\lucon.ttf',        // Lucida Console
+    '/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf',  // Linux
+    '/System/Library/Fonts/Menlo.ttc',      // macOS
+  ];
+  
+  for (const fontPath of fontPaths) {
+    if (fs.existsSync(fontPath)) {
+      try {
+        GlobalFonts.registerFromPath(fontPath, 'monospace');
+        fontRegistered = true;
+        break;
+      } catch {
+        // 尝试下一个字体
+      }
+    }
+  }
+  
+  if (!fontRegistered) {
+    console.warn('警告: 未能注册等宽字体，将使用默认字体');
+    fontRegistered = true; // 标记为已尝试，避免重复警告
+  }
 }
 
 // ANSI 颜色索引到标准颜色的映射
@@ -92,9 +135,9 @@ const ANSI_COLORS: (keyof ColorScheme)[] = [
  */
 function isCanvasAvailable(): boolean {
   try {
-    require.resolve('skia-canvas');
+    require.resolve('@napi-rs/canvas');
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    require('skia-canvas');
+    require('@napi-rs/canvas');
     return true;
   } catch {
     return false;
@@ -143,13 +186,16 @@ class Renderer {
    * 初始化画布和编码器
    */
   initCanvas(width: number, height: number): void {
-    const { createCanvas } = getCanvas()!;
-    this._canvas = createCanvas(width, height) as Canvas;
+    // 注册字体
+    registerFonts();
+    
+    const { createCanvas } = getCanvas();
+    this._canvas = createCanvas(width, height);
     this._ctx = this._canvas.getContext('2d');
 
-    // 设置字体
+    // 设置字体（使用注册的 monospace 或系统默认等宽字体）
     if (this._ctx) {
-      this._ctx.font = `${this.options.terminal.fontSize}px ${this.options.terminal.fontFamily}`;
+      this._ctx.font = `${this.options.terminal.fontSize}px monospace`;
       this._ctx.textBaseline = 'top';
     }
   }
@@ -184,7 +230,17 @@ class Renderer {
       ? this.options.rendering.titleBarHeight
       : 0;
 
-    const charWidth = this.getCharWidth();
+    const fontSize = this.options.terminal.fontSize;
+    
+    // 如果 canvas 已初始化，使用 measureText 获取精确宽度
+    // 否则使用估算值（等宽字体宽度约为字体大小的 0.6 倍）
+    let charWidth: number;
+    if (this._ctx) {
+      charWidth = this._ctx.measureText('M').width;
+    } else {
+      charWidth = fontSize * 0.6;
+    }
+    
     const lineHeight = this.getLineHeight();
 
     const terminalWidth = Math.round(charWidth * (this._recording?.cols || 80));
@@ -280,7 +336,7 @@ class Renderer {
 
       // 绘制标题
       this._ctx.fillStyle = '#888888';
-      this._ctx.font = `12px ${this.options.terminal.fontFamily}`;
+      this._ctx.font = `12px sans-serif`;
       this._ctx.textAlign = 'center';
       this._ctx.fillText(windowTitle || this._recording.name, width / 2, titleBarHeight / 2 - 6);
       this._ctx.textAlign = 'left';
@@ -339,8 +395,8 @@ class Renderer {
     const offsetX = padding;
     const offsetY = padding + (showWindowTitle ? titleBarHeight : 0);
 
-    // 设置字体
-    this._ctx.font = `${this.options.terminal.fontSize}px ${this.options.terminal.fontFamily}`;
+    // 设置字体（使用 monospace）
+    this._ctx.font = `${this.options.terminal.fontSize}px monospace`;
 
     const lineHeight = this.getLineHeight();
     const charWidth = this.getCharWidth();
@@ -432,7 +488,9 @@ class Renderer {
    * 渲染单帧
    */
   renderFrame(frame: Frame): void {
-    const { width, height } = this.calculateCanvasSize();
+    // 使用 canvas 实际尺寸
+    const width = this._canvas?.width || 0;
+    const height = this._canvas?.height || 0;
 
     // 绘制背景
     this.drawWindowBackground(width, height);
@@ -479,9 +537,9 @@ class Renderer {
         // 渲染帧
         this.renderFrame(frame);
 
-        // 保存为 PNG
+        // 保存为 PNG（@napi-rs/canvas 使用 encode 方法）
         const framePath = path.join(tempDir, `frame_${i.toString().padStart(6, '0')}.png`);
-        const buffer = this._canvas!.toBuffer('image/png');
+        const buffer = await this._canvas!.encode('png');
         fs.writeFileSync(framePath, buffer);
 
         // 进度回调
@@ -509,29 +567,40 @@ class Renderer {
     frameDelays: number[],
     frameRate: number
   ): Promise<void> {
-    // 方法1: 使用 concat demuxer 处理变帧率
+    // Windows 下使用绝对路径调用 ffmpeg
+    const ffmpegPath = process.env.FFMPEG_PATH || 'ffmpeg';
+    
     // 创建帧列表文件
     const listPath = path.join(tempDir, 'frames.txt');
     const listContent = frameDelays.map((delay, i) => {
       const duration = delay / 1000; // 转换为秒
       const frameFile = `frame_${i.toString().padStart(6, '0')}.png`;
+      // 使用相对路径，避免 Windows 路径问题
       return `file '${frameFile}'\nduration ${duration}`;
     }).join('\n');
     // 最后一帧需要再列一次（ffmpeg concat 要求）
     const lastFrame = `frame_${(frameDelays.length - 1).toString().padStart(6, '0')}.png`;
     fs.writeFileSync(listPath, listContent + `\nfile '${lastFrame}'`);
 
-    // 构建 ffmpeg 命令
     // 使用 palette 方式获得更高质量的 GIF
     const palettePath = path.join(tempDir, 'palette.png');
 
     // 生成调色板
-    const paletteCmd = `ffmpeg -y -f concat -safe 0 -i "${listPath}" -vf "palettegen=stats_mode=full" "${palettePath}"`;
-    execSync(paletteCmd, { cwd: tempDir, stdio: 'pipe' });
+    const paletteCmd = `"${ffmpegPath}" -y -f concat -safe 0 -i "frames.txt" -vf "palettegen=stats_mode=full" "palette.png"`;
+    try {
+      execSync(paletteCmd, { cwd: tempDir, stdio: 'inherit' });
+    } catch (error) {
+      throw new Error(`ffmpeg 调色板生成失败: ${error}`);
+    }
 
-    // 使用调色板生成 GIF
-    const gifCmd = `ffmpeg -y -f concat -safe 0 -i "${listPath}" -i "${palettePath}" -lavfi "paletteuse=dither=bayer:bayer_scale=5" "${outputPath}"`;
-    execSync(gifCmd, { cwd: tempDir, stdio: 'pipe' });
+    // 使用调色板生成 GIF（使用绝对路径）
+    const absOutputPath = path.resolve(outputPath);
+    const gifCmd = `"${ffmpegPath}" -y -f concat -safe 0 -i "frames.txt" -i "palette.png" -lavfi "paletteuse=dither=bayer:bayer_scale=5" "${absOutputPath}"`;
+    try {
+      execSync(gifCmd, { cwd: tempDir, stdio: 'inherit' });
+    } catch (error) {
+      throw new Error(`ffmpeg GIF 生成失败: ${error}`);
+    }
   }
 
   /**
@@ -596,7 +665,7 @@ async function renderGif(sessionName: string, outputPath?: string, options: Rend
 /**
  * 预览渲染
  */
-function renderFramePreview(sessionName: string, frameIndex: number, outputPath: string): string {
+async function renderFramePreview(sessionName: string, frameIndex: number, outputPath: string): Promise<string> {
   const { getRecordingPath } = require('./config');
   const recordingPath = getRecordingPath(sessionName);
 
@@ -613,8 +682,8 @@ function renderFramePreview(sessionName: string, frameIndex: number, outputPath:
 
   renderer.renderFrame(frame);
 
-  // 保存为 PNG
-  const buffer = renderer.canvas!.toBuffer('image/png');
+  // 保存为 PNG（@napi-rs/canvas 使用 encode 方法）
+  const buffer = await renderer.canvas!.encode('png');
   fs.writeFileSync(outputPath, buffer);
 
   return outputPath;
