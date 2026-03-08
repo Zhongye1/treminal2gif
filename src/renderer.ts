@@ -86,29 +86,44 @@ function registerFonts(): void {
 
   const { GlobalFonts } = getCanvas();
 
-  // Windows 系统等宽字体路径
+  // Windows 系统等宽字体路径（包含中文字体）
   const fontPaths = [
-    'C:\\Windows\\Fonts\\consola.ttf', // Consolas
-    'C:\\Windows\\Fonts\\cour.ttf', // Courier New
-    'C:\\Windows\\Fonts\\lucon.ttf', // Lucida Console
-    '/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf', // Linux
-    '/System/Library/Fonts/Menlo.ttc', // macOS
+    // 中文优先：使用支持中文的等宽字体
+    'C:\\Windows\\Fonts\\msyh.ttc', // 微软雅黑（支持中文）
+    'C:\\Windows\\Fonts\\simsun.ttc', // 宋体（支持中文）
+    'C:\\Windows\\Fonts\\simhei.ttf', // 黑体（支持中文）
+    'C:\\Windows\\Fonts\\consola.ttf', // Consolas（仅英文）
+    'C:\\Windows\\Fonts\\cour.ttf', // Courier New（仅英文）
+    'C:\\Windows\\Fonts\\lucon.ttf', // Lucida Console（仅英文）
+
+    // Linux 系统
+    '/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf',
+    '/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc', // Noto CJK（支持中文）
+
+    // macOS 系统
+    '/System/Library/Fonts/PingFang.ttc', // 苹方（支持中文）
+    '/System/Library/Fonts/Menlo.ttc',
+    '/System/Library/Fonts/STHeiti Light.ttc', // 华文黑体（支持中文）
   ];
 
   for (const fontPath of fontPaths) {
     if (fs.existsSync(fontPath)) {
       try {
+        // 注册为 'monospace' 和 'sans-serif'
         GlobalFonts.registerFromPath(fontPath, 'monospace');
+        GlobalFonts.registerFromPath(fontPath, 'sans-serif');
         fontRegistered = true;
-        break;
-      } catch {
+        console.log(`[FONT] Registered: ${fontPath}`);
+        break; // 使用第一个找到的字体
+      } catch (err) {
+        console.warn(`[WARN] Failed to register font: ${fontPath}，${err}`);
         // 尝试下一个字体
       }
     }
   }
 
   if (!fontRegistered) {
-    console.warn('警告: 未能注册等宽字体，将使用默认字体');
+    console.warn('警告：未能注册字体，将使用系统默认字体');
     fontRegistered = true; // 标记为已尝试，避免重复警告
   }
 }
@@ -596,20 +611,22 @@ class Renderer {
     }
 
     // 绘制光标
-    if (this.options.terminal.cursorStyle !== 'none') {
-      const { rows } = this.getRecordingSize();
-      const cursorLine = Math.min(lines.length - 1, rows - 1);
-      const lastLine = lines[cursorLine] || '';
-      const cursorX = offsetX + this.getTextWidth(lastLine);
-      const cursorY = offsetY + cursorLine * lineHeight;
-
-      this._ctx.fillStyle =
-        colors.cursor ||
-        this.options.colors.cursor ||
-        colors.foreground ||
-        this.options.colors.foreground;
-      this._ctx.fillRect(cursorX, cursorY, charWidth, lineHeight);
-    }
+    // if (this.options.terminal.cursorStyle !== 'none') {
+    //   const { rows } = this.getRecordingSize();
+    //   const cursorLine = Math.min(lines.length - 1, rows - 1);
+    //   const lastLine = lines[cursorLine] || '';
+    //   const cursorX = offsetX + this.getTextWidth(lastLine);
+    //
+    //   const cursorY = offsetY + cursorLine * lineHeight;
+    //
+    //   this._ctx.fillStyle =
+    //     colors.cursor ||
+    //     this.options.colors.cursor ||
+    //     colors.foreground ||
+    //     this.options.colors.foreground;
+    //   this._ctx.fillRect(cursorX, cursorY, charWidth, lineHeight);
+    // }
+    // 光标渲染已禁用
   }
 
   /**
@@ -708,6 +725,29 @@ class Renderer {
           options.onProgress(i + 1, frames.length);
         }
       }
+
+      // 添加 0.5 秒的结束帧（重复最后一帧）
+      // console.log('[FRAME] Adding 0.5s end frame...');
+      // const lastFrameIndex = frames.length - 1;
+      const endFramePath = path.join(
+        tempDir,
+        `frame_${frames.length.toString().padStart(6, '0')}.png`
+      );
+
+      // 使用最后一帧的 canvas 状态，直接保存
+      const endBuffer = await this._canvas!.encode('png');
+      try {
+        const rgbEndBuffer = await sharp(endBuffer)
+          .removeAlpha()
+          .png({ compressionLevel: 6 })
+          .toBuffer();
+        fs.writeFileSync(endFramePath, rgbEndBuffer);
+      } catch {
+        fs.writeFileSync(endFramePath, endBuffer);
+      }
+
+      // 添加 1500ms 的延迟
+      frameDelays.push(1500);
 
       // 使用 ffmpeg 合成 GIF
       console.log('[FFMPEG] Starting GIF generation...');
