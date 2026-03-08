@@ -18,6 +18,13 @@ export function ensureDir(dirPath: string): void {
 }
 
 /**
+ * 检查录制文件是否存在
+ */
+export function recordingExists(filePath: string): boolean {
+  return fs.existsSync(filePath);
+}
+
+/**
  * 格式化时间戳为可读字符串
  */
 export function formatTimestamp(timestamp: number): string {
@@ -84,10 +91,10 @@ export function loadRecordingV2(filePath: string): RecordingDataV2 {
  */
 export function loadRecordingAny(filePath: string): RecordingData | RecordingDataV2 {
   if (!fs.existsSync(filePath)) {
-    throw new Error(`录制文件不存在: ${filePath}`);
+    throw new Error(`录制文件不存在：${filePath}`);
   }
   const content = fs.readFileSync(filePath, 'utf-8');
-  return JSON.parse(content);
+  return JSON.parse(content) as RecordingData | RecordingDataV2;
 }
 
 /**
@@ -174,6 +181,7 @@ export function eventsToFrames(
 
   for (let i = 0; i < events.length; i++) {
     const event = events[i];
+    if (!event) continue;
     vt.feed(event.data);
 
     // 只在足够时间间隔后记录帧
@@ -223,6 +231,7 @@ export function eventsToFramesSmart(
 
   for (let i = 0; i < events.length; i++) {
     const event = events[i];
+    if (!event) continue;
     vt.feed(event.data);
 
     const currentContent = vt.getSnapshot();
@@ -253,6 +262,7 @@ export function eventsToFramesSmart(
  */
 export function parseAnsi(text: string): AnsiSegment[] {
   // ANSI SGR 转义序列正则 (颜色和样式)
+  // eslint-disable-next-line no-control-regex
   const ansiRegex = /\x1b\[([0-9;]*)m/g;
 
   const segments: AnsiSegment[] = [];
@@ -290,7 +300,7 @@ export function parseAnsi(text: string): AnsiSegment[] {
     saveSegment(plainText, currentStyle);
 
     // 解析 ANSI 代码
-    const codes = match[1].split(';').map(Number);
+    const codes = match[1]?.split(';').map(Number) || [];
     for (const code of codes) {
       if (code === 0) {
         // 重置所有样式
@@ -335,18 +345,23 @@ export function parseAnsi(text: string): AnsiSegment[] {
   saveSegment(remainingText, currentStyle);
 
   // 移除所有 ANSI 控制序列和其他控制字符
-  // 包括: CSI 序列 (\x1b[...), OSC 序列 (\x1b]...), 其他转义
+  // 包括：CSI 序列 (\x1b[...), OSC 序列 (\x1b]...), 其他转义
   const cleanSegments = segments.map((seg) => ({
     ...seg,
     text: seg.text
       // 移除 CSI 序列 (大部分终端控制)
+      // eslint-disable-next-line no-control-regex
       .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
       // 移除 OSC 序列 (标题设置等)
+      // eslint-disable-next-line no-control-regex
       .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
       // 移除其他 ANSI 转义序列
+      // eslint-disable-next-line no-control-regex
       .replace(/\x1b[()][AB012]/g, '')
+      // eslint-disable-next-line no-control-regex
       .replace(/\x1b[78]/g, '')
       // 移除其他控制字符 (除换行和制表符外)
+      // eslint-disable-next-line no-control-regex
       .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, ''),
   }));
 
@@ -361,6 +376,61 @@ export function getTerminalSize(): { cols: number; rows: number } {
     cols: process.stdout.columns || defaultConfig.terminal.cols,
     rows: process.stdout.rows || defaultConfig.terminal.rows,
   };
+}
+
+/**
+ * 计算帧延迟（根据时间戳差值）
+ */
+export function calculateDelays(frames: Frame[]): Frame[] {
+  const result: Frame[] = [];
+  let lastTimestamp = 0;
+
+  for (const frame of frames) {
+    const delay = frame.timestamp - lastTimestamp;
+    result.push({
+      ...frame,
+      delay: Math.max(0, delay),
+    });
+    lastTimestamp = frame.timestamp;
+  }
+
+  return result;
+}
+
+/**
+ * 优化帧序列（移除空闲帧）
+ */
+export function optimizeFrames(frames: Frame[], maxIdleTime: number = 2000): Frame[] {
+  if (frames.length === 0) return frames;
+
+  const result: Frame[] = [frames[0]!];
+  let accumulatedDelay = 0;
+
+  for (let i = 1; i < frames.length; i++) {
+    const prevFrame = frames[i - 1]!;
+    const currentFrame = frames[i]!;
+    const delay = currentFrame.timestamp - prevFrame.timestamp;
+
+    // 如果内容相同且延迟不超过最大空闲时间，合并
+    if (currentFrame.content === prevFrame.content && delay <= maxIdleTime) {
+      accumulatedDelay += delay;
+    } else {
+      // 添加新帧并更新延迟
+      const newFrame = { ...currentFrame };
+      if (accumulatedDelay > 0) {
+        newFrame.delay = (newFrame.delay || 0) + accumulatedDelay;
+        accumulatedDelay = 0;
+      }
+      result.push(newFrame);
+    }
+  }
+
+  // 处理第一帧的延迟
+  if (result.length > 0) {
+    result[0]!.delay = frames[0]?.delay || 0;
+  }
+
+  return result;
 }
 
 /**
@@ -393,14 +463,25 @@ export function printWelcome(): void {
 /**
  * 打印录制信息
  */
-export function printRecordingInfo(recording: RecordingData): void {
+export function printRecordingInfo(recording: RecordingData | RecordingDataV2): void {
   console.log('\n录制信息:');
-  console.log(`  名称: ${recording.name}`);
-  console.log(`  创建时间: ${new Date(recording.createdAt).toLocaleString()}`);
-  console.log(`  帧数: ${recording.frames.length}`);
-  console.log(`  终端尺寸: ${recording.cols}x${recording.rows}`);
-  if (recording.frames.length > 0) {
-    const duration = recording.frames[recording.frames.length - 1].timestamp;
-    console.log(`  时长: ${formatTimestamp(duration)}`);
+  
+  // 根据版本提取信息
+  if ((recording as RecordingDataV2).version === 2) {
+    const v2 = recording as RecordingDataV2;
+    console.log(`  名称：${v2.meta.title}`);
+    console.log(`  创建时间：${new Date(v2.meta.createdAt).toLocaleString()}`);
+    console.log(`  终端尺寸：${v2.meta.cols}x${v2.meta.rows}`);
+    console.log(`  时长：${formatTimestamp(v2.meta.duration)}`);
+  } else {
+    const v1 = recording as RecordingData;
+    console.log(`  名称：${v1.name}`);
+    console.log(`  创建时间：${new Date(v1.createdAt).toLocaleString()}`);
+    console.log(`  帧数：${v1.frames.length}`);
+    console.log(`  终端尺寸：${v1.cols}x${v1.rows}`);
+    if (v1.frames.length > 0) {
+      const duration = v1.frames[v1.frames.length - 1]?.timestamp ?? 0;
+      console.log(`  时长：${formatTimestamp(duration)}`);
+    }
   }
 }

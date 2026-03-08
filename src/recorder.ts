@@ -5,9 +5,8 @@
  */
 
 import * as pty from 'node-pty';
-import * as path from 'path';
 import * as os from 'os';
-import { RecordingData, RecordingDataV2, OutputEvent, Frame, Config } from './types';
+import { RecordingDataV2, OutputEvent, Config } from './types';
 import { getConfig, getRecordingPath } from './config';
 import { saveRecording, getTerminalSize, delay } from './utils';
 
@@ -26,7 +25,7 @@ class Recorder {
   public onOutput: ((data: string, ts: number) => void) | null;
   public onStop: ((recording: RecordingDataV2) => void) | null;
 
-  constructor(options: Partial<Config> = {}) {
+  constructor(options?: { terminal?: { cols?: number; rows?: number; fontSize?: number } }) {
     this.options = getConfig(options);
     this.events = [];
     this.startTime = 0;
@@ -42,7 +41,10 @@ class Recorder {
   /**
    * 开始录制
    */
-  async start(sessionName: string): Promise<{ name: string; pid: number; cols: number; rows: number }> {
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async start(
+    sessionName: string
+  ): Promise<{ name: string; pid: number; cols: number; rows: number }> {
     if (this._isRecording) {
       throw new Error('已经在录制中');
     }
@@ -139,7 +141,7 @@ class Recorder {
    */
   async stop(): Promise<RecordingDataV2 | null> {
     if (!this._isRecording) {
-      return null;
+      return Promise.resolve(null);
     }
 
     this._isRecording = false;
@@ -154,9 +156,7 @@ class Recorder {
       this.ptyProcess = null;
     }
 
-    const duration = this.events.length > 0
-      ? this.events[this.events.length - 1].ts
-      : 0;
+    const duration = this.events.length > 0 ? (this.events[this.events.length - 1]?.ts ?? 0) : 0;
 
     // 构建 V2 格式录制数据
     const recording: RecordingDataV2 = {
@@ -199,7 +199,7 @@ class Recorder {
    */
   getDuration(): number {
     if (this.events.length === 0) return 0;
-    return this.events[this.events.length - 1].ts;
+    return this.events[this.events.length - 1]?.ts ?? 0;
   }
 
   /**
@@ -213,7 +213,10 @@ class Recorder {
 /**
  * 交互式录制
  */
-async function recordInteractive(sessionName: string, options: Partial<Config> = {}): Promise<RecordingDataV2> {
+async function recordInteractive(
+  sessionName: string,
+  options?: { terminal?: { cols?: number; rows?: number; fontSize?: number } }
+): Promise<RecordingDataV2> {
   return new Promise((resolve, reject) => {
     const recorder = new Recorder(options);
 
@@ -265,11 +268,12 @@ async function recordInteractive(sessionName: string, options: Partial<Config> =
 async function recordCommands(
   sessionName: string,
   commands: string[],
-  options: Partial<Config> & {
+  options?: {
+    terminal?: { cols?: number; rows?: number; fontSize?: number };
     waitAfter?: number;
     delayBetween?: number;
     initialDelay?: number;
-  } = {}
+  }
 ): Promise<RecordingDataV2> {
   return new Promise((resolve, reject) => {
     const recorder = new Recorder(options);
@@ -279,29 +283,34 @@ async function recordCommands(
     };
 
     // 开始录制
-    recorder.start(sessionName).then(() => {
-      // 逐个执行命令
-      let commandIndex = 0;
-      const executeNext = async (): Promise<void> => {
-        if (commandIndex >= commands.length) {
-          // 所有命令执行完毕，等待一段时间后停止
-          await delay(options.waitAfter || 1000);
-          recorder.stop();
-          return;
-        }
+    recorder
+      .start(sessionName)
+      .then(() => {
+        // 逐个执行命令
+        let commandIndex = 0;
+        const executeNext = async (): Promise<void> => {
+          if (commandIndex >= commands.length) {
+            // 所有命令执行完毕，等待一段时间后停止
+            await delay(options?.waitAfter || 1000);
+            recorder.stop();
+            return;
+          }
 
-        const command = commands[commandIndex];
-        recorder.write(command + '\r');
-        commandIndex++;
+          const command = commands[commandIndex];
+          recorder.write(command + '\r');
+          commandIndex++;
 
-        // 等待命令执行
-        await delay(options.delayBetween || 500);
-        await executeNext();
-      };
+          // 等待命令执行
+          await delay(options?.delayBetween || 500);
+          await executeNext();
+        };
 
-      // 开始执行命令
-      setTimeout(() => executeNext(), options.initialDelay || 500);
-    }).catch(reject);
+        // 开始执行命令
+        setTimeout(() => {
+          executeNext().catch(reject);
+        }, options?.initialDelay || 500);
+      })
+      .catch(reject);
   });
 }
 
@@ -317,9 +326,4 @@ function isPtyAvailable(): boolean {
   }
 }
 
-export {
-  Recorder,
-  recordInteractive,
-  recordCommands,
-  isPtyAvailable,
-};
+export { Recorder, recordInteractive, recordCommands, isPtyAvailable };

@@ -9,9 +9,8 @@ import * as path from 'path';
 import * as os from 'os';
 import { execSync } from 'child_process';
 import { Frame, Config, RecordingData, RecordingDataV2, ColorScheme, SizeEstimate } from './types';
-import { getConfig, getOutputPath } from './config';
-import { loadRecordingAny, parseAnsi, ensureDir, eventsToFramesSmart, detectRecordingVersion } from './utils';
-import { VirtualTerminal } from './virtualTerminal';
+import { getConfig, getOutputPath, getRecordingPath } from './config';
+import { loadRecordingAny, parseAnsi, ensureDir, eventsToFramesSmart } from './utils';
 
 // @napi-rs/canvas 类型定义
 type CanvasTextAlign = 'left' | 'right' | 'center' | 'start' | 'end';
@@ -64,13 +63,13 @@ let fontRegistered = false;
 function getCanvas(): CanvasModule {
   if (!canvasModule) {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       canvasModule = require('@napi-rs/canvas');
     } catch {
       throw new Error(
         '@napi-rs/canvas 模块未正确安装。\n' +
-        '请运行: npm install @napi-rs/canvas\n\n' +
-        '@napi-rs/canvas 是基于 Skia 的高性能 Canvas 库，预编译二进制，无需额外依赖。'
+          '请运行: npm install @napi-rs/canvas\n\n' +
+          '@napi-rs/canvas 是基于 Skia 的高性能 Canvas 库，预编译二进制，无需额外依赖。'
       );
     }
   }
@@ -82,18 +81,18 @@ function getCanvas(): CanvasModule {
  */
 function registerFonts(): void {
   if (fontRegistered) return;
-  
+
   const { GlobalFonts } = getCanvas();
-  
+
   // Windows 系统等宽字体路径
   const fontPaths = [
-    'C:\\Windows\\Fonts\\consola.ttf',      // Consolas
-    'C:\\Windows\\Fonts\\cour.ttf',         // Courier New
-    'C:\\Windows\\Fonts\\lucon.ttf',        // Lucida Console
-    '/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf',  // Linux
-    '/System/Library/Fonts/Menlo.ttc',      // macOS
+    'C:\\Windows\\Fonts\\consola.ttf', // Consolas
+    'C:\\Windows\\Fonts\\cour.ttf', // Courier New
+    'C:\\Windows\\Fonts\\lucon.ttf', // Lucida Console
+    '/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf', // Linux
+    '/System/Library/Fonts/Menlo.ttc', // macOS
   ];
-  
+
   for (const fontPath of fontPaths) {
     if (fs.existsSync(fontPath)) {
       try {
@@ -105,7 +104,7 @@ function registerFonts(): void {
       }
     }
   }
-  
+
   if (!fontRegistered) {
     console.warn('警告: 未能注册等宽字体，将使用默认字体');
     fontRegistered = true; // 标记为已尝试，避免重复警告
@@ -138,7 +137,7 @@ const ANSI_COLORS: (keyof ColorScheme)[] = [
 function isCanvasAvailable(): boolean {
   try {
     require.resolve('@napi-rs/canvas');
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     require('@napi-rs/canvas');
     return true;
   } catch {
@@ -175,31 +174,34 @@ class Renderer {
   }
 
   // 公共访问器
-  get recording(): RecordingData | RecordingDataV2 | null { return this._recording; }
-  get frames(): Frame[] { return this._frames; }
-  get canvas(): Canvas | null { return this._canvas; }
+  get recording(): RecordingData | RecordingDataV2 | null {
+    return this._recording;
+  }
+  get frames(): Frame[] {
+    return this._frames;
+  }
+  get canvas(): Canvas | null {
+    return this._canvas;
+  }
 
   /**
    * 加载录制文件 (自动检测 V1/V2 格式)
    */
   load(filePath: string): RecordingData | RecordingDataV2 {
     this._recording = loadRecordingAny(filePath);
-    
+
     // 如果是 V2 格式，转换为帧
     if ((this._recording as RecordingDataV2).version === 2) {
       const v2 = this._recording as RecordingDataV2;
-      this._frames = eventsToFramesSmart(
-        v2.events,
-        v2.meta.cols,
-        v2.meta.rows,
-        { onProgress: this.options.recording.frameRate > 10 ? undefined : undefined }
-      );
+      this._frames = eventsToFramesSmart(v2.events, v2.meta.cols, v2.meta.rows, {
+        onProgress: this.options.recording.frameRate > 10 ? undefined : undefined,
+      });
     } else {
       // V1 格式，直接使用帧
       const v1 = this._recording as RecordingData;
       this._frames = v1.frames;
     }
-    
+
     return this._recording;
   }
 
@@ -208,7 +210,7 @@ class Renderer {
    */
   private getRecordingSize(): { cols: number; rows: number } {
     if (!this._recording) return { cols: 80, rows: 24 };
-    
+
     if ((this._recording as RecordingDataV2).version === 2) {
       const v2 = this._recording as RecordingDataV2;
       return { cols: v2.meta.cols, rows: v2.meta.rows };
@@ -224,7 +226,7 @@ class Renderer {
   initCanvas(width: number, height: number): void {
     // 注册字体
     registerFonts();
-    
+
     const { createCanvas } = getCanvas();
     this._canvas = createCanvas(width, height);
     this._ctx = this._canvas.getContext('2d');
@@ -260,14 +262,19 @@ class Renderer {
   /**
    * 计算画布尺寸
    */
-  private calculateCanvasSize(): { width: number; height: number; terminalWidth: number; terminalHeight: number } {
+  private calculateCanvasSize(): {
+    width: number;
+    height: number;
+    terminalWidth: number;
+    terminalHeight: number;
+  } {
     const padding = this.options.rendering.padding;
     const titleBarHeight = this.options.rendering.showWindowTitle
       ? this.options.rendering.titleBarHeight
       : 0;
 
     const fontSize = this.options.terminal.fontSize;
-    
+
     // 如果 canvas 已初始化，使用 measureText 获取精确宽度
     // 否则使用估算值（等宽字体宽度约为字体大小的 0.6 倍）
     let charWidth: number;
@@ -276,7 +283,7 @@ class Renderer {
     } else {
       charWidth = fontSize * 0.6;
     }
-    
+
     const lineHeight = this.getLineHeight();
 
     const terminalWidth = Math.round(charWidth * this.getRecordingSize().cols);
@@ -317,7 +324,7 @@ class Renderer {
    */
   private getRecordingTitle(): string {
     if (!this._recording) return 'Terminal';
-    
+
     if ((this._recording as RecordingDataV2).version === 2) {
       return (this._recording as RecordingDataV2).meta.title;
     } else {
@@ -331,7 +338,16 @@ class Renderer {
   private drawWindowBackground(width: number, height: number): void {
     if (!this._ctx || !this._recording) return;
 
-    const { padding, borderRadius, shadowBlur, shadowColor, titleBarColor, titleBarHeight, showWindowTitle, windowTitle } = this.options.rendering;
+    const {
+      padding,
+      borderRadius,
+      shadowBlur,
+      shadowColor,
+      titleBarColor,
+      titleBarHeight,
+      showWindowTitle,
+      windowTitle,
+    } = this.options.rendering;
     const colors: ColorScheme = {
       ...this.options.colors,
       ...this._recording.config?.colors,
@@ -388,7 +404,11 @@ class Renderer {
       this._ctx.fillStyle = '#888888';
       this._ctx.font = `12px sans-serif`;
       this._ctx.textAlign = 'center';
-      this._ctx.fillText(windowTitle || this.getRecordingTitle(), width / 2, titleBarHeight / 2 - 6);
+      this._ctx.fillText(
+        windowTitle || this.getRecordingTitle(),
+        width / 2,
+        titleBarHeight / 2 - 6
+      );
       this._ctx.textAlign = 'left';
     }
   }
@@ -396,7 +416,15 @@ class Renderer {
   /**
    * 绘制圆角矩形
    */
-  private roundRect(x: number, y: number, w: number, h: number, radius: number, fill: boolean, stroke: boolean): void {
+  private roundRect(
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    radius: number,
+    fill: boolean,
+    stroke: boolean
+  ): void {
     if (!this._ctx) return;
     this._ctx.beginPath();
     this._ctx.moveTo(x + radius, y);
@@ -416,7 +444,14 @@ class Renderer {
   /**
    * 绘制顶部圆角矩形
    */
-  private roundRectTop(x: number, y: number, w: number, h: number, radius: number, fill: boolean): void {
+  private roundRectTop(
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    radius: number,
+    fill: boolean
+  ): void {
     if (!this._ctx) return;
     this._ctx.beginPath();
     this._ctx.moveTo(x + radius, y);
@@ -462,7 +497,7 @@ class Renderer {
     const lines = content.split('\n');
 
     for (let lineIndex = 0; lineIndex < lines.length && lineIndex < rows; lineIndex++) {
-      const line = lines[lineIndex];
+      const line: any = lines[lineIndex];
       const y = offsetY + lineIndex * lineHeight;
 
       // 解析 ANSI 颜色
@@ -477,14 +512,14 @@ class Renderer {
         let fgColor = colors.foreground || this.options.colors.foreground;
         if (segment.style.fgColor !== null) {
           const colorName = ANSI_COLORS[segment.style.fgColor];
-          fgColor = colors[colorName] || this.options.colors.foreground;
+          fgColor = colors[colorName as keyof ColorScheme] || this.options.colors.foreground;
         }
 
         // 获取背景色
         let bgColor = colors.background || this.options.colors.background;
         if (segment.style.bgColor !== null) {
           const colorName = ANSI_COLORS[segment.style.bgColor];
-          bgColor = colors[colorName] || this.options.colors.background;
+          bgColor = colors[colorName as keyof ColorScheme] || this.options.colors.background;
         }
 
         // 处理 inverse 样式
@@ -495,28 +530,28 @@ class Renderer {
         // 绘制背景
         if (bgColor !== (colors.background || this.options.colors.background)) {
           const textW = this.getTextWidth(text);
-          this._ctx!.fillStyle = bgColor;
-          this._ctx!.fillRect(x, y, textW, lineHeight);
+          this._ctx.fillStyle = bgColor;
+          this._ctx.fillRect(x, y, textW, lineHeight);
         }
 
         // 绘制文本
-        this._ctx!.fillStyle = fgColor;
-        this._ctx!.fillText(text, x, y);
+        this._ctx.fillStyle = fgColor;
+        this._ctx.fillText(text, x, y);
 
         // 处理粗体
         if (segment.style.bold) {
-          this._ctx!.fillText(text, x + 0.5, y);
+          this._ctx.fillText(text, x + 0.5, y);
         }
 
         // 处理下划线
         if (segment.style.underline) {
           const textW = this.getTextWidth(text);
-          this._ctx!.strokeStyle = fgColor;
-          this._ctx!.lineWidth = 1;
-          this._ctx!.beginPath();
-          this._ctx!.moveTo(x, y + lineHeight - 2);
-          this._ctx!.lineTo(x + textW, y + lineHeight - 2);
-          this._ctx!.stroke();
+          this._ctx.strokeStyle = fgColor;
+          this._ctx.lineWidth = 1;
+          this._ctx.beginPath();
+          this._ctx.moveTo(x, y + lineHeight - 2);
+          this._ctx.lineTo(x + textW, y + lineHeight - 2);
+          this._ctx.stroke();
         }
 
         x += this.getTextWidth(text);
@@ -531,8 +566,12 @@ class Renderer {
       const cursorX = offsetX + this.getTextWidth(lastLine);
       const cursorY = offsetY + cursorLine * lineHeight;
 
-      this._ctx!.fillStyle = colors.cursor || this.options.colors.cursor || colors.foreground || this.options.colors.foreground;
-      this._ctx!.fillRect(cursorX, cursorY, charWidth, lineHeight);
+      this._ctx.fillStyle =
+        colors.cursor ||
+        this.options.colors.cursor ||
+        colors.foreground ||
+        this.options.colors.foreground;
+      this._ctx.fillRect(cursorX, cursorY, charWidth, lineHeight);
     }
   }
 
@@ -586,7 +625,7 @@ class Renderer {
       const frameDelays: number[] = [];
 
       for (let i = 0; i < frames.length; i++) {
-        const frame = frames[i];
+        const frame = frames[i]!;
         const delay = Math.max(minDelay, frame.delay || 100);
         frameDelays.push(Math.round(delay));
 
@@ -605,7 +644,7 @@ class Renderer {
       }
 
       // 使用 ffmpeg 合成 GIF
-      await this.renderWithFfmpeg(tempDir, outputPath, frameDelays, frameRate);
+      this.renderWithFfmpeg(tempDir, outputPath, frameDelays, frameRate);
 
       return outputPath;
     } finally {
@@ -617,29 +656,30 @@ class Renderer {
   /**
    * 使用 ffmpeg 合成 GIF
    */
-  private async renderWithFfmpeg(
+  private renderWithFfmpeg(
     tempDir: string,
     outputPath: string,
     frameDelays: number[],
-    frameRate: number
-  ): Promise<void> {
+    _frameRate: number
+  ): void {
     // Windows 下使用绝对路径调用 ffmpeg
     const ffmpegPath = process.env.FFMPEG_PATH || 'ffmpeg';
-    
+
     // 创建帧列表文件
     const listPath = path.join(tempDir, 'frames.txt');
-    const listContent = frameDelays.map((delay, i) => {
-      const duration = delay / 1000; // 转换为秒
-      const frameFile = `frame_${i.toString().padStart(6, '0')}.png`;
-      // 使用相对路径，避免 Windows 路径问题
-      return `file '${frameFile}'\nduration ${duration}`;
-    }).join('\n');
+    const listContent = frameDelays
+      .map((delay, i) => {
+        const duration = delay / 1000; // 转换为秒
+        const frameFile = `frame_${i.toString().padStart(6, '0')}.png`;
+        // 使用相对路径，避免 Windows 路径问题
+        return `file '${frameFile}'\nduration ${duration}`;
+      })
+      .join('\n');
     // 最后一帧需要再列一次（ffmpeg concat 要求）
     const lastFrame = `frame_${(frameDelays.length - 1).toString().padStart(6, '0')}.png`;
     fs.writeFileSync(listPath, listContent + `\nfile '${lastFrame}'`);
 
     // 使用 palette 方式获得更高质量的 GIF
-    const palettePath = path.join(tempDir, 'palette.png');
 
     // 生成调色板
     const paletteCmd = `"${ffmpegPath}" -y -f concat -safe 0 -i "frames.txt" -vf "palettegen=stats_mode=full" "palette.png"`;
@@ -689,7 +729,7 @@ class Renderer {
     const quality = this.options.recording.quality;
 
     // 粗略估算 (GIF 压缩效率受内容影响较大)
-    const bytesPerPixel = 0.5 - (quality * 0.03);
+    const bytesPerPixel = 0.5 - quality * 0.03;
     const estimatedBytes = width * height * frameCount * bytesPerPixel;
 
     return {
@@ -704,8 +744,11 @@ class Renderer {
 /**
  * 快捷渲染函数
  */
-async function renderGif(sessionName: string, outputPath?: string, options: RenderOptionsInternal = {}): Promise<string> {
-  const { getRecordingPath } = require('./config');
+async function renderGif(
+  sessionName: string,
+  outputPath?: string,
+  options: RenderOptionsInternal = {}
+): Promise<string> {
   const recordingPath = getRecordingPath(sessionName);
 
   const renderer = new Renderer();
@@ -721,8 +764,11 @@ async function renderGif(sessionName: string, outputPath?: string, options: Rend
 /**
  * 预览渲染
  */
-async function renderFramePreview(sessionName: string, frameIndex: number, outputPath: string): Promise<string> {
-  const { getRecordingPath } = require('./config');
+async function renderFramePreview(
+  sessionName: string,
+  frameIndex: number,
+  outputPath: string
+): Promise<string> {
   const recordingPath = getRecordingPath(sessionName);
 
   const renderer = new Renderer();
@@ -745,9 +791,4 @@ async function renderFramePreview(sessionName: string, frameIndex: number, outpu
   return outputPath;
 }
 
-export {
-  Renderer,
-  renderGif,
-  renderFramePreview,
-  isCanvasAvailable,
-};
+export { Renderer, renderGif, renderFramePreview, isCanvasAvailable };

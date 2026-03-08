@@ -12,13 +12,17 @@ import * as fs from 'fs';
 
 const chalk = new Chalk();
 
-const { defaultConfig, getRecordingPath, themes } = require('../src/config');
-const { ensureDir, printWelcome, printRecordingInfo, recordingExists, loadRecording } = require('../src/utils');
+import { defaultConfig, getRecordingPath, themes } from '../src/config';
+import { printWelcome, printRecordingInfo, recordingExists, loadRecording } from '../src';
 
 // 版本信息
-const packageJson = require('../package.json');
+import packageJson from '../package.json';
 
 // 设置程序信息
+
+// 延迟加载 recorder 模块
+import { isPtyAvailable, recordCommands, recordInteractive } from '../src/recorder';
+
 const program = new Command();
 program
   .name('treminal2gif')
@@ -34,62 +38,67 @@ program
   .option('--font-size <number>', '字体大小', parseInt)
   .option('--theme <name>', '主题名称', 'default')
   .option('--exec <command>', '执行命令并录制')
-  .action(async (sessionName: string, options: {
-    cols?: number;
-    rows?: number;
-    fontSize?: number;
-    theme?: string;
-    exec?: string;
-  }) => {
-    try {
-      // 延迟加载 recorder 模块
-      const { recordInteractive, recordCommands, isPtyAvailable } = require('../src/recorder');
+  .action(
+    async (
+      sessionName: string,
+      options: {
+        cols?: number;
+        rows?: number;
+        fontSize?: number;
+        theme?: string;
+        exec?: string;
+      }
+    ) => {
+      try {
+        // 检查 PTY 是否可用
+        if (!isPtyAvailable()) {
+          console.error(chalk.red('错误: node-pty 未正确安装，无法进行录制'));
+          console.log(chalk.yellow('请尝试运行: npm rebuild node-pty'));
+          process.exit(1);
+        }
 
-      // 检查 PTY 是否可用
-      if (!isPtyAvailable()) {
-        console.error(chalk.red('错误: node-pty 未正确安装，无法进行录制'));
-        console.log(chalk.yellow('请尝试运行: npm rebuild node-pty'));
+        // 检查会话名称
+        const recordingPath = getRecordingPath(sessionName);
+        if (recordingExists(recordingPath)) {
+          console.error(chalk.red(`错误: 录制 "${sessionName}" 已存在`));
+          console.log(chalk.yellow('使用 "treminal2gif edit ' + sessionName + '" 编辑现有录制'));
+          process.exit(1);
+        }
+
+        console.log(chalk.cyan(`\n开始录制: ${sessionName}`));
+        console.log(chalk.gray(`保存位置: ${recordingPath}`));
+        console.log(chalk.yellow('\n按 Ctrl+D 或 Ctrl+C 结束录制\n'));
+
+        // 准备选项
+        const recordOptions: { terminal?: { cols?: number; rows?: number; fontSize?: number } } =
+          {};
+        if (options.cols)
+          recordOptions.terminal = { ...recordOptions.terminal, cols: options.cols };
+        if (options.rows)
+          recordOptions.terminal = { ...recordOptions.terminal, rows: options.rows };
+        if (options.fontSize)
+          recordOptions.terminal = { ...recordOptions.terminal, fontSize: options.fontSize };
+
+        // 执行命令录制或交互录制
+        let recording;
+        if (options.exec) {
+          const commands = options.exec.includes('&&')
+            ? options.exec.split('&&').map((c: string) => c.trim())
+            : [options.exec];
+          recording = await recordCommands(sessionName, commands, recordOptions);
+        } else {
+          recording = await recordInteractive(sessionName, recordOptions);
+        }
+
+        console.log(chalk.green('\n录制完成!'));
+        printRecordingInfo(recording);
+        console.log(chalk.gray('\n使用 "treminal2gif render ' + sessionName + '" 生成 GIF'));
+      } catch (error) {
+        console.error(chalk.red('录制失败:'), (error as Error).message);
         process.exit(1);
       }
-
-      // 检查会话名称
-      const recordingPath = getRecordingPath(sessionName);
-      if (recordingExists(recordingPath)) {
-        console.error(chalk.red(`错误: 录制 "${sessionName}" 已存在`));
-        console.log(chalk.yellow('使用 "treminal2gif edit ' + sessionName + '" 编辑现有录制'));
-        process.exit(1);
-      }
-
-      console.log(chalk.cyan(`\n开始录制: ${sessionName}`));
-      console.log(chalk.gray(`保存位置: ${recordingPath}`));
-      console.log(chalk.yellow('\n按 Ctrl+D 或 Ctrl+C 结束录制\n'));
-
-      // 准备选项
-      const recordOptions: { terminal?: { cols?: number; rows?: number; fontSize?: number } } = {};
-      if (options.cols) recordOptions.terminal = { ...recordOptions.terminal, cols: options.cols };
-      if (options.rows) recordOptions.terminal = { ...recordOptions.terminal, rows: options.rows };
-      if (options.fontSize) recordOptions.terminal = { ...recordOptions.terminal, fontSize: options.fontSize };
-
-      // 执行命令录制或交互录制
-      let recording;
-      if (options.exec) {
-        const commands = options.exec.includes('&&')
-          ? options.exec.split('&&').map((c: string) => c.trim())
-          : [options.exec];
-        recording = await recordCommands(sessionName, commands, recordOptions);
-      } else {
-        recording = await recordInteractive(sessionName, recordOptions);
-      }
-
-      console.log(chalk.green('\n录制完成!'));
-      printRecordingInfo(recording);
-      console.log(chalk.gray('\n使用 "treminal2gif render ' + sessionName + '" 生成 GIF'));
-
-    } catch (error) {
-      console.error(chalk.red('录制失败:'), (error as Error).message);
-      process.exit(1);
     }
-  });
+  );
 
 // edit 命令
 program
@@ -105,122 +114,128 @@ program
   .option('--delete <range>', '删除帧范围 (如: 50-60)')
   .option('-i, --info', '显示录制信息')
   .option('-l, --list [count]', '列出帧', parseInt)
-  .action(async (sessionName: string, options: {
-    delay?: number;
-    theme?: string;
-    font?: string;
-    fontSize?: number;
-    optimize?: boolean;
-    maxIdle?: number;
-    keep?: string;
-    delete?: string;
-    info?: boolean;
-    list?: number | boolean;
-  }) => {
-    try {
-      // 延迟加载 editor 模块
-      const { Editor } = require('../src/editor');
-
-      const recordingPath = getRecordingPath(sessionName);
-
-      if (!recordingExists(recordingPath)) {
-        console.error(chalk.red(`错误: 录制 "${sessionName}" 不存在`));
-        console.log(chalk.yellow('使用 "treminal2gif record ' + sessionName + '" 创建录制'));
-        process.exit(1);
+  .action(
+    (
+      sessionName: string,
+      options: {
+        delay?: number;
+        theme?: string;
+        font?: string;
+        fontSize?: number;
+        optimize?: boolean;
+        maxIdle?: number;
+        keep?: string;
+        delete?: string;
+        info?: boolean;
+        list?: number | boolean;
       }
+    ) => {
+      try {
+        // 延迟加载 editor 模块
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const Editor = require('../src/editor').Editor;
 
-      const editor = new Editor(recordingPath);
-      editor.load();
+        const recordingPath = getRecordingPath(sessionName);
 
-      // 显示信息
-      if (options.info) {
-        const info = editor.getInfo();
-        console.log(chalk.cyan('\n录制信息:'));
-        console.log(`  名称: ${info.name}`);
-        console.log(`  创建时间: ${new Date(info.createdAt).toLocaleString()}`);
-        console.log(`  帧数: ${info.frameCount}`);
-        console.log(`  时长: ${info.durationFormatted}`);
-        console.log(`  尺寸: ${info.cols} x ${info.rows}`);
-        return;
-      }
-
-      // 列出帧
-      if (options.list !== undefined) {
-        const count = typeof options.list === 'number' ? options.list : 20;
-        const frames = editor.listFrames(0, count);
-        console.log(chalk.cyan('\n帧列表:'));
-        frames.forEach((f: { index: number; delay: number; contentLength: number }) => {
-          console.log(`  [${f.index}] 延迟: ${f.delay}ms | 内容长度: ${f.contentLength}`);
-        });
-        return;
-      }
-
-      // 应用编辑
-      let modified = false;
-
-      if (options.delay !== undefined) {
-        editor.setAllDelays(options.delay);
-        modified = true;
-        console.log(chalk.green(`已设置所有帧延迟: ${options.delay}ms`));
-      }
-
-      if (options.theme) {
-        if (!themes[options.theme]) {
-          console.error(chalk.red(`未知主题: ${options.theme}`));
-          console.log(chalk.yellow('可用主题: ' + Object.keys(themes).join(', ')));
+        if (!recordingExists(recordingPath)) {
+          console.error(chalk.red(`错误: 录制 "${sessionName}" 不存在`));
+          console.log(chalk.yellow('使用 "treminal2gif record ' + sessionName + '" 创建录制'));
           process.exit(1);
         }
-        editor.setTheme(options.theme);
-        modified = true;
-        console.log(chalk.green(`已设置主题: ${options.theme}`));
-      }
 
-      if (options.font) {
-        editor.setFont(options.font, options.fontSize);
-        modified = true;
-        console.log(chalk.green(`已设置字体: ${options.font}`));
-      }
+        const editor = new Editor(recordingPath);
+        editor.load();
 
-      if (options.fontSize) {
-        editor.setFont(null, options.fontSize);
-        modified = true;
-        console.log(chalk.green(`已设置字号: ${options.fontSize}px`));
-      }
+        // 显示信息
+        if (options.info) {
+          const info = editor.getInfo();
+          console.log(chalk.cyan('\n录制信息:'));
+          console.log(`  名称: ${info.name}`);
+          console.log(`  创建时间: ${new Date(info.createdAt).toLocaleString()}`);
+          console.log(`  帧数: ${info.frameCount}`);
+          console.log(`  时长: ${info.durationFormatted}`);
+          console.log(`  尺寸: ${info.cols} x ${info.rows}`);
+          return;
+        }
 
-      if (options.optimize) {
-        editor.optimize(options.maxIdle);
-        modified = true;
-        console.log(chalk.green('已优化帧序列'));
-      }
+        // 列出帧
+        if (options.list !== undefined) {
+          const count = typeof options.list === 'number' ? options.list : 20;
+          const frames = editor.listFrames(0, count);
+          console.log(chalk.cyan('\n帧列表:'));
+          frames.forEach((f: { index: number; delay: number; contentLength: number }) => {
+            console.log(`  [${f.index}] 延迟: ${f.delay}ms | 内容长度: ${f.contentLength}`);
+          });
+          return;
+        }
 
-      if (options.keep) {
-        const [start, end] = options.keep.split('-').map(Number);
-        editor.keepFrameRange(start, end);
-        modified = true;
-        console.log(chalk.green(`已保留帧范围: ${start}-${end}`));
-      }
+        // 应用编辑
+        let modified = false;
 
-      if (options.delete) {
-        const [start, end] = options.delete.split('-').map(Number);
-        editor.deleteFrameRange(start, end);
-        modified = true;
-        console.log(chalk.green(`已删除帧范围: ${start}-${end}`));
-      }
+        if (options.delay !== undefined) {
+          editor.setAllDelays(options.delay);
+          modified = true;
+          console.log(chalk.green(`已设置所有帧延迟: ${options.delay}ms`));
+        }
 
-      if (modified) {
-        editor.save();
-        console.log(chalk.green('\n修改已保存'));
-        const info = editor.getInfo();
-        console.log(`当前帧数: ${info.frameCount}`);
-      } else {
-        console.log(chalk.yellow('没有指定任何编辑操作'));
-      }
+        if (options.theme) {
+          // 检查主题是否有效
+          if (!Object.keys(themes).includes(options.theme)) {
+            console.error(chalk.red(`未知主题：${options.theme}`));
+            console.log(chalk.yellow('可用主题：' + Object.keys(themes).join(', ')));
+            process.exit(1);
+          }
+          editor.setTheme(options.theme);
+          modified = true;
+          console.log(chalk.green(`已设置主题：${options.theme}`));
+        }
 
-    } catch (error) {
-      console.error(chalk.red('编辑失败:'), (error as Error).message);
-      process.exit(1);
+        if (options.font) {
+          editor.setFont(options.font, options.fontSize);
+          modified = true;
+          console.log(chalk.green(`已设置字体: ${options.font}`));
+        }
+
+        if (options.fontSize) {
+          editor.setFont(null, options.fontSize);
+          modified = true;
+          console.log(chalk.green(`已设置字号: ${options.fontSize}px`));
+        }
+
+        if (options.optimize) {
+          editor.optimize(options.maxIdle);
+          modified = true;
+          console.log(chalk.green('已优化帧序列'));
+        }
+
+        if (options.keep) {
+          const [start, end] = options.keep.split('-').map(Number);
+          editor.keepFrameRange(start, end);
+          modified = true;
+          console.log(chalk.green(`已保留帧范围: ${start}-${end}`));
+        }
+
+        if (options.delete) {
+          const [start, end] = options.delete.split('-').map(Number);
+          editor.deleteFrameRange(start, end);
+          modified = true;
+          console.log(chalk.green(`已删除帧范围: ${start}-${end}`));
+        }
+
+        if (modified) {
+          editor.save();
+          console.log(chalk.green('\n修改已保存'));
+          const info = editor.getInfo();
+          console.log(`当前帧数: ${info.frameCount}`);
+        } else {
+          console.log(chalk.yellow('没有指定任何编辑操作'));
+        }
+      } catch (error) {
+        console.error(chalk.red('编辑失败:'), (error as Error).message);
+        process.exit(1);
+      }
     }
-  });
+  );
 
 // render 命令
 program
@@ -231,81 +246,88 @@ program
   .option('-q, --quality <number>', 'GIF 质量 (1-20)', parseInt)
   .option('--preview', '预览模式 (只渲染关键帧)')
   .option('--estimate', '估算文件大小')
-  .action(async (sessionName: string, options: {
-    output?: string;
-    fps?: number;
-    quality?: number;
-    preview?: boolean;
-    estimate?: boolean;
-  }) => {
-    try {
-      // 延迟加载 renderer 模块
-      const { Renderer, isCanvasAvailable } = require('../src/renderer');
+  .action(
+    async (
+      sessionName: string,
+      options: {
+        output?: string;
+        fps?: number;
+        quality?: number;
+        preview?: boolean;
+        estimate?: boolean;
+      }
+    ) => {
+      try {
+        // 延迟加载 renderer 模块
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const Renderer = require('../src/renderer').Renderer;
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const isCanvasAvailable = require('../src/renderer').isCanvasAvailable;
 
-      const recordingPath = getRecordingPath(sessionName);
+        const recordingPath = getRecordingPath(sessionName);
 
-      if (!recordingExists(recordingPath)) {
-        console.error(chalk.red(`错误: 录制 "${sessionName}" 不存在`));
+        if (!recordingExists(recordingPath)) {
+          console.error(chalk.red(`错误: 录制 "${sessionName}" 不存在`));
+          process.exit(1);
+        }
+
+        // 检查 canvas 是否可用
+        if (!isCanvasAvailable()) {
+          console.error(chalk.red('错误: skia-canvas 模块未正确安装，无法进行渲染'));
+          console.log(chalk.yellow('\n请运行: npm install skia-canvas'));
+          console.log(chalk.gray('skia-canvas 是 node-canvas 的现代替代品，无需额外的系统依赖。'));
+          process.exit(1);
+        }
+
+        const renderOptions: { frameRate?: number; recording?: { quality: number } } = {};
+        if (options.fps) renderOptions.frameRate = options.fps;
+        if (options.quality) renderOptions.recording = { quality: options.quality };
+
+        const renderer = new Renderer(renderOptions);
+        renderer.load(recordingPath);
+
+        // 估算大小
+        if (options.estimate) {
+          const estimate = renderer.estimateSize();
+          console.log(chalk.cyan('\n渲染预估:'));
+          console.log(`  尺寸: ${estimate.width} x ${estimate.height}`);
+          console.log(`  帧数: ${estimate.frameCount}`);
+          console.log(`  预估大小: ${estimate.estimatedSizeMB} MB`);
+          return;
+        }
+
+        const outputPath = options.output || path.join('.', `${sessionName}.gif`);
+
+        console.log(chalk.cyan(`\n正在渲染: ${sessionName}`));
+        console.log(chalk.gray(`输出到: ${outputPath}`));
+
+        // 渲染进度
+        let lastProgress = 0;
+
+        const result = await renderer.render(outputPath, {
+          ...renderOptions,
+          onProgress: (current: number, total: number) => {
+            const progress = Math.floor((current / total) * 100);
+            if (progress > lastProgress) {
+              process.stdout.write(`\r渲染进度: ${progress}% (${current}/${total} 帧)`);
+              lastProgress = progress;
+            }
+          },
+        });
+
+        console.log(chalk.green('\n\n渲染完成!'));
+        console.log(chalk.gray(`输出文件: ${result}`));
+
+        // 显示文件大小
+        const stats = fs.statSync(result);
+        const sizeMB = (stats.size / 1024 / 1024).toFixed(2);
+        console.log(chalk.gray(`文件大小: ${sizeMB} MB`));
+      } catch (error) {
+        console.error(chalk.red('渲染失败:'), (error as Error).message);
         process.exit(1);
       }
-
-      // 检查 canvas 是否可用
-      if (!isCanvasAvailable()) {
-        console.error(chalk.red('错误: skia-canvas 模块未正确安装，无法进行渲染'));
-        console.log(chalk.yellow('\n请运行: npm install skia-canvas'));
-        console.log(chalk.gray('skia-canvas 是 node-canvas 的现代替代品，无需额外的系统依赖。'));
-        process.exit(1);
-      }
-
-      const renderOptions: { frameRate?: number; recording?: { quality: number } } = {};
-      if (options.fps) renderOptions.frameRate = options.fps;
-      if (options.quality) renderOptions.recording = { quality: options.quality };
-
-      const renderer = new Renderer(renderOptions);
-      renderer.load(recordingPath);
-
-      // 估算大小
-      if (options.estimate) {
-        const estimate = renderer.estimateSize();
-        console.log(chalk.cyan('\n渲染预估:'));
-        console.log(`  尺寸: ${estimate.width} x ${estimate.height}`);
-        console.log(`  帧数: ${estimate.frameCount}`);
-        console.log(`  预估大小: ${estimate.estimatedSizeMB} MB`);
-        return;
-      }
-
-      const outputPath = options.output || path.join('.', `${sessionName}.gif`);
-
-      console.log(chalk.cyan(`\n正在渲染: ${sessionName}`));
-      console.log(chalk.gray(`输出到: ${outputPath}`));
-
-      // 渲染进度
-      let lastProgress = 0;
-
-      const result = await renderer.render(outputPath, {
-        ...renderOptions,
-        onProgress: (current: number, total: number) => {
-          const progress = Math.floor((current / total) * 100);
-          if (progress > lastProgress) {
-            process.stdout.write(`\r渲染进度: ${progress}% (${current}/${total} 帧)`);
-            lastProgress = progress;
-          }
-        },
-      });
-
-      console.log(chalk.green('\n\n渲染完成!'));
-      console.log(chalk.gray(`输出文件: ${result}`));
-
-      // 显示文件大小
-      const stats = fs.statSync(result);
-      const sizeMB = (stats.size / 1024 / 1024).toFixed(2);
-      console.log(chalk.gray(`文件大小: ${sizeMB} MB`));
-
-    } catch (error) {
-      console.error(chalk.red('渲染失败:'), (error as Error).message);
-      process.exit(1);
     }
-  });
+  );
 
 // list 命令
 program
@@ -351,7 +373,6 @@ program
       });
 
       console.log();
-
     } catch (error) {
       console.error(chalk.red('列出失败:'), (error as Error).message);
       process.exit(1);
@@ -406,7 +427,6 @@ program
 
       fs.unlinkSync(recordingPath);
       console.log(chalk.green(`已删除录制: ${sessionName}`));
-
     } catch (error) {
       console.error(chalk.red('删除失败:'), (error as Error).message);
       process.exit(1);

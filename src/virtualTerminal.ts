@@ -243,7 +243,9 @@ export class VirtualTerminal {
     const command = seq[end];
     this.parseBuffer = seq.slice(end + 1);
 
-    this.executeCSI(params, command);
+    if (command) {
+      this.executeCSI(params, command);
+    }
     return true;
   }
 
@@ -336,10 +338,10 @@ export class VirtualTerminal {
    */
   private parseCSIParams(params: string): number[] {
     if (!params) return [];
-    
+
     // 移除前缀如 '?'
     const cleanParams = params.replace(/^[?;]/, '');
-    
+
     return cleanParams.split(';').map(p => {
       const n = parseInt(p, 10);
       return isNaN(n) ? 0 : n;
@@ -525,8 +527,11 @@ export class VirtualTerminal {
     const { buffer, cols, rows } = this.state;
 
     // 清除当前行剩余部分
-    for (let i = x; i < cols; i++) {
-      buffer[y][i] = createEmptyCell();
+    const currentRow = buffer[y];
+    if (currentRow) {
+      for (let i = x; i < cols; i++) {
+        currentRow[i] = createEmptyCell();
+      }
     }
 
     // 清除后续行
@@ -540,7 +545,7 @@ export class VirtualTerminal {
    */
   private clearFromStartToCursor(): void {
     const { x, y } = this.state.cursor;
-    const { buffer, cols, rows } = this.state;
+    const { buffer, cols } = this.state;
 
     // 清除之前行
     for (let j = 0; j < y; j++) {
@@ -548,8 +553,11 @@ export class VirtualTerminal {
     }
 
     // 清除当前行到光标
-    for (let i = 0; i <= x; i++) {
-      buffer[y][i] = createEmptyCell();
+    const currentRow = buffer[y];
+    if (currentRow) {
+      for (let i = 0; i <= x; i++) {
+        currentRow[i] = createEmptyCell();
+      }
     }
   }
 
@@ -571,6 +579,8 @@ export class VirtualTerminal {
     const { x, y } = this.state.cursor;
     const { buffer, cols } = this.state;
     const row = buffer[y];
+
+    if (!row) return;
 
     switch (mode) {
       case 0: // 从光标到行尾
@@ -630,10 +640,12 @@ export class VirtualTerminal {
     const { buffer, cols } = this.state;
     const { x, y } = this.state.cursor;
     const row = buffer[y];
+    if (!row) return;
 
     for (let i = x; i < cols; i++) {
       const srcIdx = i + count;
-      row[i] = srcIdx < cols ? { ...row[srcIdx] } : createEmptyCell();
+      const sourceCell = row[srcIdx];
+      row[i] = srcIdx < cols && sourceCell ? { ...sourceCell } : createEmptyCell();
     }
   }
 
@@ -644,9 +656,11 @@ export class VirtualTerminal {
     const { buffer, cols } = this.state;
     const { x, y } = this.state.cursor;
     const row = buffer[y];
+    if (!row) return;
 
     for (let i = cols - 1; i >= x + count; i--) {
-      row[i] = { ...row[i - count] };
+      const sourceCell = row[i - count];
+      row[i] = sourceCell ? { ...sourceCell } : createEmptyCell();
     }
     for (let i = x; i < x + count && i < cols; i++) {
       row[i] = createEmptyCell();
@@ -660,6 +674,7 @@ export class VirtualTerminal {
     const { buffer, cols } = this.state;
     const { x, y } = this.state.cursor;
     const row = buffer[y];
+    if (!row) return;
 
     for (let i = x; i < x + count && i < cols; i++) {
       row[i] = createEmptyCell();
@@ -730,23 +745,47 @@ export class VirtualTerminal {
           this.state.style.strikethrough = false;
           break;
         // 前景色 (30-37)
-        case 30: case 31: case 32: case 33:
-        case 34: case 35: case 36: case 37:
+        case 30:
+        case 31:
+        case 32:
+        case 33:
+        case 34:
+        case 35:
+        case 36:
+        case 37:
           this.state.style.fg = code - 30;
           break;
         // 前景色亮色 (90-97)
-        case 90: case 91: case 92: case 93:
-        case 94: case 95: case 96: case 97:
+        case 90:
+        case 91:
+        case 92:
+        case 93:
+        case 94:
+        case 95:
+        case 96:
+        case 97:
           this.state.style.fg = code - 90 + 8;
           break;
         // 背景色 (40-47)
-        case 40: case 41: case 42: case 43:
-        case 44: case 45: case 46: case 47:
+        case 40:
+        case 41:
+        case 42:
+        case 43:
+        case 44:
+        case 45:
+        case 46:
+        case 47:
           this.state.style.bg = code - 40;
           break;
         // 背景色亮色 (100-107)
-        case 100: case 101: case 102: case 103:
-        case 104: case 105: case 106: case 107:
+        case 100:
+        case 101:
+        case 102:
+        case 103:
+        case 104:
+        case 105:
+        case 106:
+        case 107:
           this.state.style.bg = code - 100 + 8;
           break;
         case 38: // 扩展前景色
@@ -793,6 +832,8 @@ export class VirtualTerminal {
 
     for (let y = 0; y < this.state.rows; y++) {
       const row = this.state.buffer[y];
+      if (!row) continue;
+      
       let line = '';
       for (let x = 0; x < this.state.cols; x++) {
         line += row[x]?.char || ' ';

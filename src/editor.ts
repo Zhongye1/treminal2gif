@@ -2,19 +2,33 @@
  * 录制编辑模块
  */
 
-import { RecordingData, Frame, RecordingInfo, FrameSummary, Config, ColorScheme } from './types';
-import { getConfig, getRecordingPath, getTheme, mergeConfig } from './config';
-import { loadRecording, saveRecording, calculateDelays, optimizeFrames, formatTimestamp } from './utils';
+import {
+  RecordingData,
+  Frame,
+  RecordingInfo,
+  FrameSummary,
+  Config,
+  ColorScheme,
+  ThemeName,
+} from './types';
+import { getConfig, getRecordingPath, getTheme } from './config';
+import {
+  loadRecording,
+  saveRecording,
+  calculateDelays,
+  optimizeFrames,
+  formatTimestamp,
+} from './utils';
 
 /**
  * 编辑器类
  */
 class Editor {
-  private filePath: string;
-  private options: Config;
+  private readonly filePath: string;
   private _recording: RecordingData | null;
   private _frames: Frame[];
   private modified: boolean;
+  options: Config;
 
   constructor(recordingPath: string, options: Partial<Config> = {}) {
     this.filePath = recordingPath;
@@ -25,8 +39,12 @@ class Editor {
   }
 
   // 公共访问器
-  get recording(): RecordingData | null { return this._recording; }
-  get frames(): Frame[] { return this._frames; }
+  get recording(): RecordingData | null {
+    return this._recording;
+  }
+  get frames(): Frame[] {
+    return this._frames;
+  }
 
   /**
    * 加载录制文件
@@ -45,7 +63,7 @@ class Editor {
       throw new Error('请先加载录制文件');
     }
 
-    const duration = this._frames.length > 0 ? this._frames[this._frames.length - 1].timestamp : 0;
+    const duration = this._frames.length > 0 ? this._frames[this._frames.length - 1]!.timestamp : 0;
 
     return {
       name: this._recording.name,
@@ -64,9 +82,9 @@ class Editor {
    */
   setFrameDelay(frameIndex: number, delay: number): void {
     if (frameIndex < 0 || frameIndex >= this._frames.length) {
-      throw new Error(`帧索引超出范围: ${frameIndex}`);
+      throw new Error(`帧索引超出范围：${frameIndex}`);
     }
-    this._frames[frameIndex].delay = Math.max(0, delay);
+    this._frames[frameIndex]!.delay = Math.max(0, delay);
     this.modified = true;
   }
 
@@ -75,7 +93,7 @@ class Editor {
    */
   setAllDelays(delay: number): void {
     for (let i = 0; i < this._frames.length; i++) {
-      this._frames[i].delay = Math.max(0, delay);
+      this._frames[i]!.delay = Math.max(0, delay);
     }
     this.modified = true;
   }
@@ -85,7 +103,7 @@ class Editor {
    */
   deleteFrame(frameIndex: number): void {
     if (frameIndex < 0 || frameIndex >= this._frames.length) {
-      throw new Error(`帧索引超出范围: ${frameIndex}`);
+      throw new Error(`帧索引超出范围：${frameIndex}`);
     }
     this._frames.splice(frameIndex, 1);
     this.modified = true;
@@ -125,7 +143,8 @@ class Editor {
    * 设置主题
    */
   setTheme(themeName: string): void {
-    const theme = getTheme(themeName);
+    const validThemes = ['default', 'dracula', 'monokai', 'solarizedDark', 'oneHalfDark'];
+    const theme = getTheme(validThemes.includes(themeName) ? (themeName as ThemeName) : 'default');
     if (this._recording) {
       this._recording.config.colors = theme;
     }
@@ -137,7 +156,7 @@ class Editor {
    */
   setColors(colors: Partial<ColorScheme>): void {
     if (this._recording) {
-      this._recording.config.colors = mergeConfig(this._recording.config.colors, colors);
+      this._recording.config.colors = { ...this._recording.config.colors, ...colors };
     }
     this.modified = true;
   }
@@ -181,10 +200,10 @@ class Editor {
       const frame = this._frames[i];
       result.push({
         index: i,
-        timestamp: frame.timestamp,
-        delay: frame.delay || 0,
-        contentLength: frame.content ? frame.content.length : 0,
-        preview: frame.content ? frame.content.slice(0, 50).replace(/\n/g, '\\n') : '',
+        timestamp: frame!.timestamp,
+        delay: frame!.delay || 0,
+        contentLength: frame!.content ? frame!.content.length : 0,
+        preview: frame!.content ? frame!.content.slice(0, 50).replace(/\n/g, '\\n') : '',
       });
     }
 
@@ -196,9 +215,9 @@ class Editor {
    */
   getFrame(frameIndex: number): Frame {
     if (frameIndex < 0 || frameIndex >= this._frames.length) {
-      throw new Error(`帧索引超出范围: ${frameIndex}`);
+      throw new Error(`帧索引超出范围：${frameIndex}`);
     }
-    return this._frames[frameIndex];
+    return this._frames[frameIndex]!;
   }
 
   /**
@@ -253,16 +272,19 @@ class Editor {
 /**
  * 快捷编辑函数
  */
-function quickEdit(sessionName: string, edits: {
-  delay?: number;
-  theme?: string;
-  fontFamily?: string;
-  fontSize?: number;
-  optimize?: boolean;
-  maxIdleTime?: number;
-  keepRange?: [number, number];
-  deleteRange?: [number, number];
-} = {}): RecordingData {
+function quickEdit(
+  sessionName: string,
+  edits: {
+    delay?: number;
+    theme?: string;
+    fontFamily?: string;
+    fontSize?: number;
+    optimize?: boolean;
+    maxIdleTime?: number;
+    keepRange?: [number, number];
+    deleteRange?: [number, number];
+  } = {}
+): RecordingData {
   const filePath = getRecordingPath(sessionName);
   const editor = new Editor(filePath);
   editor.load();
@@ -313,14 +335,12 @@ function showInfo(sessionName: string): RecordingData {
   console.log(`  创建时间: ${new Date(info.createdAt).toLocaleString()}`);
   console.log(`  帧数: ${editor.frames.length}`);
   console.log(`  终端尺寸: ${info.cols} x ${info.rows}`);
-  console.log(`  时长: ${formatTimestamp(editor.frames.length > 0 ? editor.frames[editor.frames.length - 1].timestamp : 0)}`);
+  console.log(
+    `  时长：${formatTimestamp(editor.frames.length > 0 ? editor.frames[editor.frames.length - 1]!.timestamp : 0)}`
+  );
   console.log(`  字体: ${info.config.fontSize}px ${info.config.fontFamily}`);
 
   return info;
 }
 
-export {
-  Editor,
-  quickEdit,
-  showInfo,
-};
+export { Editor, quickEdit, showInfo };

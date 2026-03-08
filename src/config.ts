@@ -161,23 +161,35 @@ const themes: Themes = {
 /**
  * 深度合并配置
  */
-function mergeConfig<T extends object>(base: T, override: Partial<T>): T {
-  const result = { ...base };
+function mergeConfig<T extends object>(
+  base: Config,
+  override?: {
+    terminal?: { cols?: number; rows?: number; fontSize?: number };
+  }
+): T {
+  const result = { ...base } as T;
+  if (!override) return result;
+
   for (const key in override) {
-    if (override[key] !== undefined) {
-      if (
-        override[key] &&
-        typeof override[key] === 'object' &&
-        !Array.isArray(override[key]) &&
-        base[key] &&
-        typeof base[key] === 'object'
-      ) {
-        result[key] = mergeConfig(
-          base[key] as object,
-          override[key] as Partial<object>
-        ) as T[Extract<keyof T, string>];
-      } else {
-        result[key] = override[key] as T[Extract<keyof T, string>];
+    if (Object.prototype.hasOwnProperty.call(override, key)) {
+      const overrideValue = override[key as keyof typeof override];
+      const baseValue = base[key as keyof Config];
+
+      if (overrideValue !== undefined) {
+        if (
+          overrideValue &&
+          typeof overrideValue === 'object' &&
+          !Array.isArray(overrideValue) &&
+          baseValue &&
+          typeof baseValue === 'object'
+        ) {
+          result[key as keyof T] = mergeConfig(
+            baseValue as unknown as Config,
+            overrideValue as Partial<object>
+          ) as T[Extract<keyof T, string>];
+        } else {
+          result[key as keyof T] = overrideValue as T[Extract<keyof T, string>];
+        }
       }
     }
   }
@@ -187,15 +199,17 @@ function mergeConfig<T extends object>(base: T, override: Partial<T>): T {
 /**
  * 获取配置
  */
-function getConfig(userConfig: Partial<Config> = {}): Config {
+function getConfig(userConfig?: {
+  terminal?: { cols?: number; rows?: number; fontSize?: number };
+}): Config {
   return mergeConfig(defaultConfig, userConfig);
 }
 
 /**
  * 获取主题颜色
  */
-function getTheme(themeName: ThemeName | string): ColorScheme {
-  return themes[themeName as ThemeName] || themes.default;
+function getTheme(themeName: ThemeName): ColorScheme {
+  return themes[themeName] || themes.default;
 }
 
 /**
@@ -213,12 +227,4 @@ function getOutputPath(sessionName: string, outputDir?: string): string {
   return path.join(outputDir || '.', `${sessionName}.gif`);
 }
 
-export {
-  defaultConfig,
-  themes,
-  mergeConfig,
-  getConfig,
-  getTheme,
-  getRecordingPath,
-  getOutputPath,
-};
+export { defaultConfig, themes, mergeConfig, getConfig, getTheme, getRecordingPath, getOutputPath };
