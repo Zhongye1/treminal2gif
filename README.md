@@ -26,9 +26,9 @@ git clone <repository-url>
 cd treminal2gif
 ```
 
-2. 安装依赖
+2. 安装依赖（使用bun）
 ```bash
-npm install
+bun install
 ```
 
 3. Windows 用户额外安装 GTK
@@ -41,13 +41,13 @@ npm install
 
 ```bash
 # 开始交互式录制
-npx treminal2gif record my-session
+bun run start record my-session
 
 # 指定终端尺寸
-npx treminal2gif record my-session --cols 100 --rows 30
+bun run start record my-session --cols 100 --rows 30
 
 # 录制特定命令
-npx treminal2gif record my-session --exec "ls -la && pwd"
+bun run start record my-session --exec "ls -la && pwd"
 ```
 
 录制完成后，按 `Ctrl+D` 或 `Ctrl+C` 结束录制。
@@ -56,57 +56,57 @@ npx treminal2gif record my-session --exec "ls -la && pwd"
 
 ```bash
 # 显示录制信息
-npx treminal2gif edit my-session --info
+bun run start edit my-session --info
 
 # 设置所有帧的延迟
-npx treminal2gif edit my-session --delay 100
+bun run start edit my-session --delay 100
 
 # 更改主题
-npx treminal2gif edit my-session --theme dracula
+bun run start edit my-session --theme dracula
 
 # 优化帧序列（移除空闲时间）
-npx treminal2gif edit my-session --optimize
+bun run start edit my-session --optimize
 
 # 保留特定帧范围
-npx treminal2gif edit my-session --keep 0-100
+bun run start edit my-session --keep 0-100
 
 # 删除特定帧范围
-npx treminal2gif edit my-session --delete 50-60
+bun run start edit my-session --delete 50-60
 ```
 
 ### 3. 渲染为 GIF
 
 ```bash
 # 渲染为 GIF
-npx treminal2gif render my-session
+bun run start render my-session
 
 # 指定输出路径
-npx treminal2gif render my-session --output ./output.gif
+bun run start render my-session --output ./output.gif
 
 # 设置帧率
-npx treminal2gif render my-session --fps 30
+bun run start render my-session --fps 30
 
 # 预览渲染（仅估算）
-npx treminal2gif render my-session --estimate
+bun run start render my-session --estimate
 ```
 
 ### 4. 其他命令
 
 ```bash
 # 列出所有录制
-npx treminal2gif list
+bun run start list
 
 # 显示详细信息
-npx treminal2gif list --detailed
+bun run start list --detailed
 
 # 显示当前配置
-npx treminal2gif config
+bun run start config
 
 # 列出可用主题
-npx treminal2gif config --themes
+bun run start config --themes
 
 # 删除录制
-npx treminal2gif delete my-session
+bun run start delete my-session
 ```
 
 ## 命令详解

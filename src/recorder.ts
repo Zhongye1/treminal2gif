@@ -39,7 +39,7 @@ class Recorder {
     this.ptyProcess = null;
     this.sessionName = null;
     this._isRecording = false;
-    this.cols = 80;
+    this.cols = 100;
     this.rows = 24;
     this.onOutput = null;
     this.onStop = null;

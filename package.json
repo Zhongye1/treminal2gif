@@ -5,7 +5,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "treminal2gif": "./bin/cli.ts"
+    "treminal2gif": "./bin/cli-wrapper.js"
   },
   "scripts": {
     "start": "ts-node bin/cli.ts",
