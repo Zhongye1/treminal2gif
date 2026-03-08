@@ -15,7 +15,12 @@
     "edit": "ts-node bin/cli.ts edit",
     "render": "ts-node bin/cli.ts render",
     "list": "ts-node bin/cli.ts list",
-    "config": "ts-node bin/cli.ts config"
+    "config": "ts-node bin/cli.ts config",
+    "lint": "eslint src/**/*.ts --fix",
+    "lint:check": "eslint src/**/*.ts",
+    "format": "prettier --write \"src/**/*.ts\" \"bin/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"bin/**/*.ts\"",
+    "typecheck": "tsc --noEmit"
   },
   "keywords": [
     "terminal",
@@ -36,6 +41,11 @@
   },
   "devDependencies": {
     "@types/node": "^25.3.5",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.2.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   },

@@ -1,15 +1,17 @@
 /**
  * GIF 渲染模块
  * 使用 @napi-rs/canvas 绘制终端帧，并通过 ffmpeg 导出 GIF
+ * 支持 V1 和 V2 录制格式
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { execSync } from 'child_process';
-import { Frame, Config, RecordingData, ColorScheme, SizeEstimate } from './types';
+import { Frame, Config, RecordingData, RecordingDataV2, ColorScheme, SizeEstimate } from './types';
 import { getConfig, getOutputPath } from './config';
-import { loadRecording, parseAnsi, ensureDir } from './utils';
+import { loadRecordingAny, parseAnsi, ensureDir, eventsToFramesSmart, detectRecordingVersion } from './utils';
+import { VirtualTerminal } from './virtualTerminal';
 
 // @napi-rs/canvas 类型定义
 type CanvasTextAlign = 'left' | 'right' | 'center' | 'start' | 'end';
@@ -159,31 +161,65 @@ interface RenderOptionsInternal {
  */
 class Renderer {
   private options: Config;
-  private _recording: RecordingData | null;
+  private _recording: RecordingData | RecordingDataV2 | null;
+  private _frames: Frame[];
   private _canvas: Canvas | null;
   private _ctx: CanvasRenderingContext2D | null;
 
   constructor(options: Partial<Config> = {}) {
     this.options = getConfig(options);
     this._recording = null;
+    this._frames = [];
     this._canvas = null;
     this._ctx = null;
   }
 
   // 公共访问器
-  get recording(): RecordingData | null { return this._recording; }
+  get recording(): RecordingData | RecordingDataV2 | null { return this._recording; }
+  get frames(): Frame[] { return this._frames; }
   get canvas(): Canvas | null { return this._canvas; }
 
   /**
-   * 加载录制文件
+   * 加载录制文件 (自动检测 V1/V2 格式)
    */
-  load(filePath: string): RecordingData {
-    this._recording = loadRecording(filePath);
+  load(filePath: string): RecordingData | RecordingDataV2 {
+    this._recording = loadRecordingAny(filePath);
+    
+    // 如果是 V2 格式，转换为帧
+    if ((this._recording as RecordingDataV2).version === 2) {
+      const v2 = this._recording as RecordingDataV2;
+      this._frames = eventsToFramesSmart(
+        v2.events,
+        v2.meta.cols,
+        v2.meta.rows,
+        { onProgress: this.options.recording.frameRate > 10 ? undefined : undefined }
+      );
+    } else {
+      // V1 格式，直接使用帧
+      const v1 = this._recording as RecordingData;
+      this._frames = v1.frames;
+    }
+    
     return this._recording;
   }
 
   /**
-   * 初始化画布和编码器
+   * 获取录制尺寸
+   */
+  private getRecordingSize(): { cols: number; rows: number } {
+    if (!this._recording) return { cols: 80, rows: 24 };
+    
+    if ((this._recording as RecordingDataV2).version === 2) {
+      const v2 = this._recording as RecordingDataV2;
+      return { cols: v2.meta.cols, rows: v2.meta.rows };
+    } else {
+      const v1 = this._recording as RecordingData;
+      return { cols: v1.cols, rows: v1.rows };
+    }
+  }
+
+  /**
+   * 初始化画布
    */
   initCanvas(width: number, height: number): void {
     // 注册字体
@@ -243,8 +279,8 @@ class Renderer {
     
     const lineHeight = this.getLineHeight();
 
-    const terminalWidth = Math.round(charWidth * (this._recording?.cols || 80));
-    const terminalHeight = Math.round(lineHeight * (this._recording?.rows || 24));
+    const terminalWidth = Math.round(charWidth * this.getRecordingSize().cols);
+    const terminalHeight = Math.round(lineHeight * this.getRecordingSize().rows);
 
     const width = terminalWidth + padding * 2;
     const height = terminalHeight + padding * 2 + titleBarHeight;
@@ -266,13 +302,27 @@ class Renderer {
     const charWidth = fontSize * 0.6; // 近似值
     const lineHeight = Math.round(fontSize * this.options.terminal.lineHeight);
 
-    const terminalWidth = Math.round(charWidth * (this._recording?.cols || 80));
-    const terminalHeight = Math.round(lineHeight * (this._recording?.rows || 24));
+    const { cols, rows } = this.getRecordingSize();
+    const terminalWidth = Math.round(charWidth * cols);
+    const terminalHeight = Math.round(lineHeight * rows);
 
     const width = terminalWidth + padding * 2;
     const height = terminalHeight + padding * 2 + titleBarHeight;
 
     return { width, height };
+  }
+
+  /**
+   * 获取录制标题
+   */
+  private getRecordingTitle(): string {
+    if (!this._recording) return 'Terminal';
+    
+    if ((this._recording as RecordingDataV2).version === 2) {
+      return (this._recording as RecordingDataV2).meta.title;
+    } else {
+      return (this._recording as RecordingData).name;
+    }
   }
 
   /**
@@ -338,7 +388,7 @@ class Renderer {
       this._ctx.fillStyle = '#888888';
       this._ctx.font = `12px sans-serif`;
       this._ctx.textAlign = 'center';
-      this._ctx.fillText(windowTitle || this._recording.name, width / 2, titleBarHeight / 2 - 6);
+      this._ctx.fillText(windowTitle || this.getRecordingTitle(), width / 2, titleBarHeight / 2 - 6);
       this._ctx.textAlign = 'left';
     }
   }
@@ -400,17 +450,18 @@ class Renderer {
 
     const lineHeight = this.getLineHeight();
     const charWidth = this.getCharWidth();
+    const { cols, rows } = this.getRecordingSize();
 
     // 清空终端区域
-    const terminalWidth = charWidth * this._recording.cols;
-    const terminalHeight = lineHeight * this._recording.rows;
+    const terminalWidth = charWidth * cols;
+    const terminalHeight = lineHeight * rows;
     this._ctx.fillStyle = colors.background || this.options.colors.background;
     this._ctx.fillRect(offsetX, offsetY, terminalWidth, terminalHeight);
 
     // 分行处理
     const lines = content.split('\n');
 
-    for (let lineIndex = 0; lineIndex < lines.length && lineIndex < this._recording.rows; lineIndex++) {
+    for (let lineIndex = 0; lineIndex < lines.length && lineIndex < rows; lineIndex++) {
       const line = lines[lineIndex];
       const y = offsetY + lineIndex * lineHeight;
 
@@ -474,7 +525,8 @@ class Renderer {
 
     // 绘制光标
     if (this.options.terminal.cursorStyle !== 'none') {
-      const cursorLine = Math.min(lines.length - 1, this._recording.rows - 1);
+      const { rows } = this.getRecordingSize();
+      const cursorLine = Math.min(lines.length - 1, rows - 1);
       const lastLine = lines[cursorLine] || '';
       const cursorX = offsetX + this.getTextWidth(lastLine);
       const cursorY = offsetY + cursorLine * lineHeight;
@@ -507,6 +559,10 @@ class Renderer {
       throw new Error('请先加载录制文件');
     }
 
+    if (this._frames.length === 0) {
+      throw new Error('录制文件没有帧数据');
+    }
+
     const { width, height } = this.calculateCanvasSize();
 
     // 初始化画布
@@ -526,7 +582,7 @@ class Renderer {
 
     try {
       // 渲染帧并保存为 PNG
-      const frames = this._recording.frames;
+      const frames = this._frames;
       const frameDelays: number[] = [];
 
       for (let i = 0; i < frames.length; i++) {
@@ -629,7 +685,7 @@ class Renderer {
     }
 
     const { width, height } = this.estimateCanvasSize();
-    const frameCount = this._recording.frames.length;
+    const frameCount = this._frames.length;
     const quality = this.options.recording.quality;
 
     // 粗略估算 (GIF 压缩效率受内容影响较大)
@@ -675,7 +731,7 @@ async function renderFramePreview(sessionName: string, frameIndex: number, outpu
   const { width, height } = renderer.estimateCanvasSize();
   renderer.initCanvas(width, height);
 
-  const frame = renderer.recording?.frames[frameIndex];
+  const frame = renderer.frames[frameIndex];
   if (!frame) {
     throw new Error(`帧索引超出范围: ${frameIndex}`);
   }

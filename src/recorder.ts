@@ -1,38 +1,41 @@
 /**
  * 终端录制模块
  * 使用 node-pty 捕获终端会话
+ * V2 格式：记录原始事件流，更高效
  */
 
 import * as pty from 'node-pty';
 import * as path from 'path';
 import * as os from 'os';
-import { RecordingData, Frame, Config } from './types';
+import { RecordingData, RecordingDataV2, OutputEvent, Frame, Config } from './types';
 import { getConfig, getRecordingPath } from './config';
 import { saveRecording, getTerminalSize, delay } from './utils';
 
 /**
- * 录制器类
+ * 录制器类 (V2)
  */
 class Recorder {
   private options: Config;
-  private frames: Frame[];
+  private events: OutputEvent[];
   private startTime: number;
   private ptyProcess: pty.IPty | null;
-  private currentContent: string;
   private sessionName: string | null;
   private _isRecording: boolean;
-  public onFrame: ((frame: Frame) => void) | null;
-  public onStop: ((recording: RecordingData) => void) | null;
+  private cols: number;
+  private rows: number;
+  public onOutput: ((data: string, ts: number) => void) | null;
+  public onStop: ((recording: RecordingDataV2) => void) | null;
 
   constructor(options: Partial<Config> = {}) {
     this.options = getConfig(options);
-    this.frames = [];
+    this.events = [];
     this.startTime = 0;
     this.ptyProcess = null;
-    this.currentContent = '';
     this.sessionName = null;
     this._isRecording = false;
-    this.onFrame = null;
+    this.cols = 80;
+    this.rows = 24;
+    this.onOutput = null;
     this.onStop = null;
   }
 
@@ -45,15 +48,14 @@ class Recorder {
     }
 
     this.sessionName = sessionName;
-    this.frames = [];
-    this.currentContent = '';
+    this.events = [];
     this.startTime = Date.now();
     this._isRecording = true;
 
     // 获取终端尺寸
     const size = getTerminalSize();
-    const cols = this.options.terminal.cols || size.cols;
-    const rows = this.options.terminal.rows || size.rows;
+    this.cols = this.options.terminal.cols || size.cols;
+    this.rows = this.options.terminal.rows || size.rows;
 
     // 确定默认 shell
     let shell: string = process.env.SHELL || '/bin/bash';
@@ -66,8 +68,8 @@ class Recorder {
     // 创建伪终端进程
     this.ptyProcess = pty.spawn(shell, args, {
       name: 'xterm-256color',
-      cols,
-      rows,
+      cols: this.cols,
+      rows: this.rows,
       cwd: process.cwd(),
       env: {
         ...process.env,
@@ -78,8 +80,7 @@ class Recorder {
 
     // 监听终端输出
     this.ptyProcess.onData((data: string) => {
-      this.currentContent += data;
-      this.recordFrame(data);
+      this.recordEvent(data);
     });
 
     // 监听进程退出
@@ -90,25 +91,26 @@ class Recorder {
     return {
       name: sessionName,
       pid: this.ptyProcess.pid,
-      cols,
-      rows,
+      cols: this.cols,
+      rows: this.rows,
     };
   }
 
   /**
-   * 记录一帧
+   * 记录输出事件
    */
-  private recordFrame(data: string): void {
-    const frame: Frame = {
-      timestamp: Date.now() - this.startTime,
-      content: this.currentContent,
+  private recordEvent(data: string): void {
+    const ts = Date.now() - this.startTime;
+
+    const event: OutputEvent = {
+      ts,
       data,
     };
 
-    this.frames.push(frame);
+    this.events.push(event);
 
-    if (this.onFrame) {
-      this.onFrame(frame);
+    if (this.onOutput) {
+      this.onOutput(data, ts);
     }
   }
 
@@ -127,13 +129,15 @@ class Recorder {
   resize(cols: number, rows: number): void {
     if (this.ptyProcess && this._isRecording) {
       this.ptyProcess.resize(cols, rows);
+      this.cols = cols;
+      this.rows = rows;
     }
   }
 
   /**
-   * 停止录制并保存
+   * 停止录制并保存 (V2 格式)
    */
-  async stop(): Promise<RecordingData | null> {
+  async stop(): Promise<RecordingDataV2 | null> {
     if (!this._isRecording) {
       return null;
     }
@@ -150,19 +154,26 @@ class Recorder {
       this.ptyProcess = null;
     }
 
-    // 构建录制数据
-    const recording: RecordingData = {
-      name: this.sessionName || 'unnamed',
-      version: '1.0',
-      createdAt: new Date().toISOString(),
-      cols: this.options.terminal.cols || 80,
-      rows: this.options.terminal.rows || 24,
-      frames: this.frames,
+    const duration = this.events.length > 0
+      ? this.events[this.events.length - 1].ts
+      : 0;
+
+    // 构建 V2 格式录制数据
+    const recording: RecordingDataV2 = {
+      version: 2,
+      meta: {
+        title: this.sessionName || 'unnamed',
+        cols: this.cols,
+        rows: this.rows,
+        duration,
+        createdAt: Date.now(),
+      },
       config: {
         fontSize: this.options.terminal.fontSize,
         fontFamily: this.options.terminal.fontFamily,
         colors: this.options.colors,
       },
+      events: this.events,
     };
 
     // 保存到文件
@@ -177,18 +188,18 @@ class Recorder {
   }
 
   /**
-   * 获取当前帧数
+   * 获取事件数量
    */
-  getFrameCount(): number {
-    return this.frames.length;
+  getEventCount(): number {
+    return this.events.length;
   }
 
   /**
    * 获取录制时长 (毫秒)
    */
   getDuration(): number {
-    if (this.frames.length === 0) return 0;
-    return this.frames[this.frames.length - 1].timestamp;
+    if (this.events.length === 0) return 0;
+    return this.events[this.events.length - 1].ts;
   }
 
   /**
@@ -202,20 +213,18 @@ class Recorder {
 /**
  * 交互式录制
  */
-async function recordInteractive(sessionName: string, options: Partial<Config> = {}): Promise<RecordingData> {
+async function recordInteractive(sessionName: string, options: Partial<Config> = {}): Promise<RecordingDataV2> {
   return new Promise((resolve, reject) => {
     const recorder = new Recorder(options);
 
-    // 设置帧回调
-    recorder.onFrame = (frame: Frame) => {
+    // 设置输出回调
+    recorder.onOutput = (data: string) => {
       // 实时输出到终端
-      if (frame.data) {
-        process.stdout.write(frame.data);
-      }
+      process.stdout.write(data);
     };
 
     // 设置停止回调
-    recorder.onStop = (recording: RecordingData) => {
+    recorder.onStop = (recording: RecordingDataV2) => {
       // 恢复 stdin 模式
       if (process.stdin.isTTY) {
         process.stdin.setRawMode(false);
@@ -261,11 +270,11 @@ async function recordCommands(
     delayBetween?: number;
     initialDelay?: number;
   } = {}
-): Promise<RecordingData> {
+): Promise<RecordingDataV2> {
   return new Promise((resolve, reject) => {
     const recorder = new Recorder(options);
 
-    recorder.onStop = (recording: RecordingData) => {
+    recorder.onStop = (recording: RecordingDataV2) => {
       resolve(recording);
     };
 

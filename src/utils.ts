@@ -4,8 +4,9 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { Frame, RecordingData, AnsiStyle, AnsiSegment } from './types';
+import { Frame, RecordingData, RecordingDataV2, OutputEvent, AnsiStyle, AnsiSegment } from './types';
 import { defaultConfig } from './config';
+import { VirtualTerminal } from './virtualTerminal';
 
 /**
  * 确保目录存在
@@ -14,33 +15,6 @@ export function ensureDir(dirPath: string): void {
   if (!fs.existsSync(dirPath)) {
     fs.mkdirSync(dirPath, { recursive: true });
   }
-}
-
-/**
- * 保存录制文件
- */
-export function saveRecording(filePath: string, data: RecordingData): void {
-  const dir = path.dirname(filePath);
-  ensureDir(dir);
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
-}
-
-/**
- * 加载录制文件
- */
-export function loadRecording(filePath: string): RecordingData {
-  if (!fs.existsSync(filePath)) {
-    throw new Error(`录制文件不存在: ${filePath}`);
-  }
-  const content = fs.readFileSync(filePath, 'utf-8');
-  return JSON.parse(content) as RecordingData;
-}
-
-/**
- * 检查录制文件是否存在
- */
-export function recordingExists(filePath: string): boolean {
-  return fs.existsSync(filePath);
 }
 
 /**
@@ -60,45 +34,217 @@ export function formatTimestamp(timestamp: number): string {
 }
 
 /**
- * 计算帧之间的延迟
+ * 保存录制文件 (支持 V1 和 V2 格式)
  */
-export function calculateDelays(frames: Frame[]): Frame[] {
-  if (frames.length === 0) return [];
-
-  return frames.map((frame, index) => {
-    const delay = index === 0 ? 0 : frame.timestamp - frames[index - 1].timestamp;
-    return {
-      ...frame,
-      delay: Math.max(0, delay),
-    };
-  });
+export function saveRecording(filePath: string, data: RecordingData | RecordingDataV2): void {
+  const dir = path.dirname(filePath);
+  ensureDir(dir);
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
 }
 
 /**
- * 优化帧序列（移除空闲帧）
+ * 加载录制文件 (自动检测 V1 或 V2 格式)
  */
-export function optimizeFrames(frames: Frame[], maxIdleTime?: number): Frame[] {
-  const idleTime = maxIdleTime ?? defaultConfig.recording.maxIdleTime;
-  if (frames.length === 0) return [];
+export function loadRecording(filePath: string): RecordingData {
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`录制文件不存在: ${filePath}`);
+  }
+  const content = fs.readFileSync(filePath, 'utf-8');
+  const data = JSON.parse(content);
 
-  const result: Frame[] = [];
-  let lastContent = '';
+  // 检测格式版本
+  if (data.version === 2) {
+    // V2 格式，转换为 V1 兼容格式（用于旧代码兼容）
+    return convertV2ToV1(data as RecordingDataV2);
+  }
 
-  for (const frame of frames) {
-    // 如果内容有变化，保留帧
-    if (frame.content !== lastContent) {
-      result.push(frame);
-      lastContent = frame.content;
-    } else if (result.length > 0) {
-      // 内容没变化，但可能需要更新延迟
-      const lastFrame = result[result.length - 1];
-      if (frame.delay && frame.delay > idleTime) {
-        lastFrame.delay = idleTime;
-      }
+  return data as RecordingData;
+}
+
+/**
+ * 加载录制文件 (V2 原生格式)
+ */
+export function loadRecordingV2(filePath: string): RecordingDataV2 {
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`录制文件不存在: ${filePath}`);
+  }
+  const content = fs.readFileSync(filePath, 'utf-8');
+  const data = JSON.parse(content);
+
+  if (data.version === 2) {
+    return data as RecordingDataV2;
+  }
+
+  // V1 格式，转换为 V2
+  return convertV1ToV2(data as RecordingData);
+}
+
+/**
+ * 加载录制文件 (任意格式)
+ */
+export function loadRecordingAny(filePath: string): RecordingData | RecordingDataV2 {
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`录制文件不存在: ${filePath}`);
+  }
+  const content = fs.readFileSync(filePath, 'utf-8');
+  return JSON.parse(content);
+}
+
+/**
+ * 检测录制文件格式
+ */
+export function detectRecordingVersion(filePath: string): 1 | 2 {
+  const content = fs.readFileSync(filePath, 'utf-8');
+  const data = JSON.parse(content);
+  return data.version === 2 ? 2 : 1;
+}
+
+/**
+ * V2 转 V1 格式
+ */
+export function convertV2ToV1(v2: RecordingDataV2): RecordingData {
+  // 使用虚拟终端重建帧
+  const frames = eventsToFrames(v2.events, v2.meta.cols, v2.meta.rows);
+
+  return {
+    name: v2.meta.title,
+    version: '1.0',
+    createdAt: new Date(v2.meta.createdAt).toISOString(),
+    cols: v2.meta.cols,
+    rows: v2.meta.rows,
+    frames,
+    config: {
+      fontSize: v2.config?.fontSize || 14,
+      fontFamily: v2.config?.fontFamily || 'monospace',
+      colors: v2.config?.colors || {},
+    },
+  };
+}
+
+/**
+ * V1 转 V2 格式
+ */
+export function convertV1ToV2(v1: RecordingData): RecordingDataV2 {
+  // 从 V1 帧中提取事件
+  const events: OutputEvent[] = [];
+  let lastTs = 0;
+
+  for (const frame of v1.frames) {
+    if (frame.data) {
+      events.push({
+        ts: frame.timestamp,
+        data: frame.data,
+      });
+    }
+    lastTs = Math.max(lastTs, frame.timestamp);
+  }
+
+  return {
+    version: 2,
+    meta: {
+      title: v1.name,
+      cols: v1.cols,
+      rows: v1.rows,
+      duration: lastTs,
+      createdAt: new Date(v1.createdAt).getTime(),
+    },
+    config: v1.config,
+    events,
+  };
+}
+
+/**
+ * 事件流转帧序列
+ * 使用虚拟终端模拟器重建每一帧
+ */
+export function eventsToFrames(
+  events: OutputEvent[],
+  cols: number,
+  rows: number,
+  options: {
+    minFrameInterval?: number;
+    onProgress?: (current: number, total: number) => void;
+  } = {}
+): Frame[] {
+  const { minFrameInterval = 50, onProgress } = options;
+  const frames: Frame[] = [];
+  const vt = new VirtualTerminal(cols, rows);
+
+  let lastFrameTs = -Infinity;
+
+  for (let i = 0; i < events.length; i++) {
+    const event = events[i];
+    vt.feed(event.data);
+
+    // 只在足够时间间隔后记录帧
+    if (event.ts - lastFrameTs >= minFrameInterval || i === events.length - 1) {
+      frames.push({
+        timestamp: event.ts,
+        content: vt.getSnapshot(),
+      });
+      lastFrameTs = event.ts;
+    }
+
+    if (onProgress && i % 100 === 0) {
+      onProgress(i, events.length);
     }
   }
 
-  return result;
+  // 确保至少有一帧
+  if (frames.length === 0) {
+    frames.push({
+      timestamp: 0,
+      content: vt.getSnapshot(),
+    });
+  }
+
+  return frames;
+}
+
+/**
+ * 智能事件流转帧序列
+ * 只在内容变化时记录帧
+ */
+export function eventsToFramesSmart(
+  events: OutputEvent[],
+  cols: number,
+  rows: number,
+  options: {
+    maxFrameInterval?: number;
+    onProgress?: (current: number, total: number) => void;
+  } = {}
+): Frame[] {
+  const { maxFrameInterval = 2000, onProgress } = options;
+  const frames: Frame[] = [];
+  const vt = new VirtualTerminal(cols, rows);
+
+  let lastContent = '';
+  let lastFrameTs = 0;
+
+  for (let i = 0; i < events.length; i++) {
+    const event = events[i];
+    vt.feed(event.data);
+
+    const currentContent = vt.getSnapshot();
+    const timeSinceLastFrame = event.ts - lastFrameTs;
+
+    // 条件：内容变化 或 超过最大间隔
+    if (currentContent !== lastContent || timeSinceLastFrame >= maxFrameInterval || i === events.length - 1) {
+      frames.push({
+        timestamp: event.ts,
+        content: currentContent,
+        delay: timeSinceLastFrame,
+      });
+      lastContent = currentContent;
+      lastFrameTs = event.ts;
+    }
+
+    if (onProgress && i % 100 === 0) {
+      onProgress(i, events.length);
+    }
+  }
+
+  return frames;
 }
 
 /**
@@ -106,7 +252,7 @@ export function optimizeFrames(frames: Frame[], maxIdleTime?: number): Frame[] {
  * 简化版本，提取颜色和样式信息
  */
 export function parseAnsi(text: string): AnsiSegment[] {
-  // ANSI 转义序列正则
+  // ANSI SGR 转义序列正则 (颜色和样式)
   const ansiRegex = /\x1b\[([0-9;]*)m/g;
 
   const segments: AnsiSegment[] = [];
@@ -188,10 +334,20 @@ export function parseAnsi(text: string): AnsiSegment[] {
   const remainingText = text.slice(lastIndex);
   saveSegment(remainingText, currentStyle);
 
-  // 移除其他控制字符
+  // 移除所有 ANSI 控制序列和其他控制字符
+  // 包括: CSI 序列 (\x1b[...), OSC 序列 (\x1b]...), 其他转义
   const cleanSegments = segments.map((seg) => ({
     ...seg,
-    text: seg.text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, ''),
+    text: seg.text
+      // 移除 CSI 序列 (大部分终端控制)
+      .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
+      // 移除 OSC 序列 (标题设置等)
+      .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+      // 移除其他 ANSI 转义序列
+      .replace(/\x1b[()][AB012]/g, '')
+      .replace(/\x1b[78]/g, '')
+      // 移除其他控制字符 (除换行和制表符外)
+      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, ''),
   }));
 
   return cleanSegments;

@@ -168,3 +168,80 @@ export type ThemeName = 'default' | 'dracula' | 'monokai' | 'solarizedDark' | 'o
 
 // 主题映射
 export type Themes = Record<ThemeName, ColorScheme>;
+
+// ============ V2 格式：事件流 ============
+
+// 输出事件（记录原始终端输出）
+export interface OutputEvent {
+  /** 时间戳（毫秒，相对于录制开始） */
+  ts: number;
+  /** 原始输出数据（含 ANSI 转义序列） */
+  data: string;
+}
+
+// 录制元数据
+export interface RecordingMeta {
+  title: string;
+  cols: number;
+  rows: number;
+  duration: number;
+  createdAt: number;
+  shell?: string;
+  env?: Record<string, string>;
+}
+
+// V2 录制格式（事件流）
+export interface RecordingDataV2 {
+  version: 2;
+  meta: RecordingMeta;
+  config?: {
+    fontSize?: number;
+    fontFamily?: string;
+    colors?: Partial<ColorScheme>;
+  };
+  /** 事件流：只记录原始输出 */
+  events: OutputEvent[];
+}
+
+// 统一录制数据类型（支持 V1 和 V2）
+export type RecordingDataAny = RecordingData | RecordingDataV2;
+
+// ============ 虚拟终端 ============
+
+// 单元格样式
+export interface CellStyle {
+  fg: number;        // 前景色索引 (0-15)，-1 表示默认
+  bg: number;        // 背景色索引 (0-15)，-1 表示默认
+  bold: boolean;
+  dim: boolean;
+  italic: boolean;
+  underline: boolean;
+  blink: boolean;
+  inverse: boolean;
+  hidden: boolean;
+  strikethrough: boolean;
+}
+
+// 终端单元格
+export interface Cell {
+  char: string;
+  style: CellStyle;
+}
+
+// 光标位置
+export interface CursorPosition {
+  x: number;
+  y: number;
+}
+
+// 虚拟终端状态
+export interface TerminalState {
+  cols: number;
+  rows: number;
+  buffer: Cell[][];
+  cursor: CursorPosition;
+  savedCursor: CursorPosition | null;
+  style: CellStyle;
+  scrollTop: number;
+  scrollBottom: number;
+}
