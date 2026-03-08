@@ -2,11 +2,12 @@
  * 默认配置和主题设置
  */
 
-const path = require('path');
-const os = require('os');
+import * as path from 'path';
+import * as os from 'os';
+import { Config, ColorScheme, Themes, ThemeName } from './types';
 
 // 默认终端配置
-const defaultConfig = {
+const defaultConfig: Config = {
   // 终端设置
   terminal: {
     cols: 80,
@@ -14,19 +15,15 @@ const defaultConfig = {
     fontSize: 14,
     fontFamily: 'Monaco, Menlo, "Courier New", monospace',
     lineHeight: 1.4,
-    cursorStyle: 'block', // 'block' | 'underline' | 'bar'
+    cursorStyle: 'block',
     cursorBlink: true,
   },
 
   // 颜色方案 (基于 xterm 默认颜色)
   colors: {
-    // 前景色
     foreground: '#ffffff',
-    // 背景色
     background: '#000000',
-    // 光标色
     cursor: '#ffffff',
-    // 16 种标准颜色
     black: '#2e3436',
     red: '#cc0000',
     green: '#4e9a06',
@@ -47,22 +44,22 @@ const defaultConfig = {
 
   // 录制设置
   recording: {
-    maxIdleTime: 2000, // 最大空闲时间 (ms)，超过此时间会跳过
-    frameRate: 30, // 目标帧率
-    quality: 10, // GIF 质量 (1-10)
+    maxIdleTime: 2000,
+    frameRate: 30,
+    quality: 10,
   },
 
   // 渲染设置
   rendering: {
-    padding: 10, // 终端窗口内边距
-    borderRadius: 8, // 圆角半径
-    shadowBlur: 20, // 阴影模糊
-    shadowColor: 'rgba(0, 0, 0, 0.5)', // 阴影颜色
-    windowTitle: 'Terminal', // 窗口标题
-    showWindowTitle: true, // 是否显示窗口标题
-    titleBarHeight: 28, // 标题栏高度
-    titleBarColor: '#1e1e1e', // 标题栏背景色
-    windowFrameColor: '#1e1e1e', // 窗口边框颜色
+    padding: 10,
+    borderRadius: 8,
+    shadowBlur: 20,
+    shadowColor: 'rgba(0, 0, 0, 0.5)',
+    windowTitle: 'Terminal',
+    showWindowTitle: true,
+    titleBarHeight: 28,
+    titleBarColor: '#1e1e1e',
+    windowFrameColor: '#1e1e1e',
   },
 
   // 存储路径
@@ -73,7 +70,7 @@ const defaultConfig = {
 };
 
 // 内置主题
-const themes = {
+const themes: Themes = {
   default: defaultConfig.colors,
   dracula: {
     foreground: '#f8f8f2',
@@ -164,13 +161,24 @@ const themes = {
 /**
  * 深度合并配置
  */
-function mergeConfig(base, override) {
+function mergeConfig<T extends object>(base: T, override: Partial<T>): T {
   const result = { ...base };
   for (const key in override) {
-    if (override[key] && typeof override[key] === 'object' && !Array.isArray(override[key])) {
-      result[key] = mergeConfig(base[key] || {}, override[key]);
-    } else {
-      result[key] = override[key];
+    if (override[key] !== undefined) {
+      if (
+        override[key] &&
+        typeof override[key] === 'object' &&
+        !Array.isArray(override[key]) &&
+        base[key] &&
+        typeof base[key] === 'object'
+      ) {
+        result[key] = mergeConfig(
+          base[key] as object,
+          override[key] as Partial<object>
+        ) as T[Extract<keyof T, string>];
+      } else {
+        result[key] = override[key] as T[Extract<keyof T, string>];
+      }
     }
   }
   return result;
@@ -179,21 +187,21 @@ function mergeConfig(base, override) {
 /**
  * 获取配置
  */
-function getConfig(userConfig = {}) {
+function getConfig(userConfig: Partial<Config> = {}): Config {
   return mergeConfig(defaultConfig, userConfig);
 }
 
 /**
  * 获取主题颜色
  */
-function getTheme(themeName) {
-  return themes[themeName] || themes.default;
+function getTheme(themeName: ThemeName | string): ColorScheme {
+  return themes[themeName as ThemeName] || themes.default;
 }
 
 /**
  * 获取录制文件路径
  */
-function getRecordingPath(sessionName) {
+function getRecordingPath(sessionName: string): string {
   const recordingsDir = defaultConfig.storage.recordingsDir;
   return path.join(recordingsDir, `${sessionName}.json`);
 }
@@ -201,11 +209,11 @@ function getRecordingPath(sessionName) {
 /**
  * 获取 GIF 输出路径
  */
-function getOutputPath(sessionName, outputDir) {
+function getOutputPath(sessionName: string, outputDir?: string): string {
   return path.join(outputDir || '.', `${sessionName}.gif`);
 }
 
-module.exports = {
+export {
   defaultConfig,
   themes,
   mergeConfig,

@@ -3,38 +3,44 @@
  * 使用 node-pty 捕获终端会话
  */
 
-const pty = require('node-pty');
-const path = require('path');
-const os = require('os');
-const { getConfig, getRecordingPath, defaultConfig } = require('./config');
-const { saveRecording, getTerminalSize, delay } = require('./utils');
-
-// 录制状态
-let isRecording = false;
-let recordingSession = null;
+import * as pty from 'node-pty';
+import * as path from 'path';
+import * as os from 'os';
+import { RecordingData, Frame, Config } from './types';
+import { getConfig, getRecordingPath } from './config';
+import { saveRecording, getTerminalSize, delay } from './utils';
 
 /**
  * 录制器类
  */
 class Recorder {
-  constructor(options = {}) {
+  private options: Config;
+  private frames: Frame[];
+  private startTime: number;
+  private ptyProcess: pty.IPty | null;
+  private currentContent: string;
+  private sessionName: string | null;
+  private _isRecording: boolean;
+  public onFrame: ((frame: Frame) => void) | null;
+  public onStop: ((recording: RecordingData) => void) | null;
+
+  constructor(options: Partial<Config> = {}) {
     this.options = getConfig(options);
     this.frames = [];
-    this.startTime = null;
+    this.startTime = 0;
     this.ptyProcess = null;
     this.currentContent = '';
     this.sessionName = null;
-    this.isRecording = false;
+    this._isRecording = false;
     this.onFrame = null;
     this.onStop = null;
   }
 
   /**
    * 开始录制
-   * @param {string} sessionName 会话名称
    */
-  async start(sessionName) {
-    if (this.isRecording) {
+  async start(sessionName: string): Promise<{ name: string; pid: number; cols: number; rows: number }> {
+    if (this._isRecording) {
       throw new Error('已经在录制中');
     }
 
@@ -42,7 +48,7 @@ class Recorder {
     this.frames = [];
     this.currentContent = '';
     this.startTime = Date.now();
-    this.isRecording = true;
+    this._isRecording = true;
 
     // 获取终端尺寸
     const size = getTerminalSize();
@@ -50,8 +56,8 @@ class Recorder {
     const rows = this.options.terminal.rows || size.rows;
 
     // 确定默认 shell
-    let shell = process.env.SHELL || '/bin/bash';
-    const args = [];
+    let shell: string = process.env.SHELL || '/bin/bash';
+    const args: string[] = [];
 
     if (os.platform() === 'win32') {
       shell = process.env.COMSPEC || 'cmd.exe';
@@ -67,17 +73,17 @@ class Recorder {
         ...process.env,
         TERM: 'xterm-256color',
         COLORTERM: 'truecolor',
-      },
+      } as { [key: string]: string },
     });
 
     // 监听终端输出
-    this.ptyProcess.onData((data) => {
+    this.ptyProcess.onData((data: string) => {
       this.currentContent += data;
       this.recordFrame(data);
     });
 
     // 监听进程退出
-    this.ptyProcess.onExit(({ exitCode }) => {
+    this.ptyProcess.onExit(() => {
       this.stop();
     });
 
@@ -91,13 +97,12 @@ class Recorder {
 
   /**
    * 记录一帧
-   * @param {string} data 输出数据
    */
-  recordFrame(data) {
-    const frame = {
+  private recordFrame(data: string): void {
+    const frame: Frame = {
       timestamp: Date.now() - this.startTime,
       content: this.currentContent,
-      data, // 原始输出数据
+      data,
     };
 
     this.frames.push(frame);
@@ -109,49 +114,45 @@ class Recorder {
 
   /**
    * 发送输入到终端
-   * @param {string} data 输入数据
    */
-  write(data) {
-    if (this.ptyProcess && this.isRecording) {
-      this.ptyProcess.write(data);
+  write(data: string | Buffer): void {
+    if (this.ptyProcess && this._isRecording) {
+      this.ptyProcess.write(data.toString());
     }
   }
 
   /**
    * 调整终端大小
-   * @param {number} cols 列数
-   * @param {number} rows 行数
    */
-  resize(cols, rows) {
-    if (this.ptyProcess && this.isRecording) {
+  resize(cols: number, rows: number): void {
+    if (this.ptyProcess && this._isRecording) {
       this.ptyProcess.resize(cols, rows);
     }
   }
 
   /**
    * 停止录制并保存
-   * @returns {Object} 录制数据
    */
-  async stop() {
-    if (!this.isRecording) {
+  async stop(): Promise<RecordingData | null> {
+    if (!this._isRecording) {
       return null;
     }
 
-    this.isRecording = false;
+    this._isRecording = false;
 
     // 关闭 PTY 进程
     if (this.ptyProcess) {
       try {
         this.ptyProcess.kill();
-      } catch (e) {
+      } catch {
         // 忽略已关闭的进程错误
       }
       this.ptyProcess = null;
     }
 
     // 构建录制数据
-    const recording = {
-      name: this.sessionName,
+    const recording: RecordingData = {
+      name: this.sessionName || 'unnamed',
       version: '1.0',
       createdAt: new Date().toISOString(),
       cols: this.options.terminal.cols || 80,
@@ -165,7 +166,7 @@ class Recorder {
     };
 
     // 保存到文件
-    const filePath = getRecordingPath(this.sessionName);
+    const filePath = getRecordingPath(this.sessionName || 'unnamed');
     saveRecording(filePath, recording);
 
     if (this.onStop) {
@@ -177,40 +178,44 @@ class Recorder {
 
   /**
    * 获取当前帧数
-   * @returns {number}
    */
-  getFrameCount() {
+  getFrameCount(): number {
     return this.frames.length;
   }
 
   /**
    * 获取录制时长 (毫秒)
-   * @returns {number}
    */
-  getDuration() {
+  getDuration(): number {
     if (this.frames.length === 0) return 0;
     return this.frames[this.frames.length - 1].timestamp;
+  }
+
+  /**
+   * 是否正在录制
+   */
+  isRecording(): boolean {
+    return this._isRecording;
   }
 }
 
 /**
  * 交互式录制
- * 直接在当前终端进行录制
- * @param {string} sessionName 会话名称
- * @param {Object} options 选项
  */
-async function recordInteractive(sessionName, options = {}) {
+async function recordInteractive(sessionName: string, options: Partial<Config> = {}): Promise<RecordingData> {
   return new Promise((resolve, reject) => {
     const recorder = new Recorder(options);
 
     // 设置帧回调
-    recorder.onFrame = (frame) => {
+    recorder.onFrame = (frame: Frame) => {
       // 实时输出到终端
-      process.stdout.write(frame.data);
+      if (frame.data) {
+        process.stdout.write(frame.data);
+      }
     };
 
     // 设置停止回调
-    recorder.onStop = (recording) => {
+    recorder.onStop = (recording: RecordingData) => {
       // 恢复 stdin 模式
       if (process.stdin.isTTY) {
         process.stdin.setRawMode(false);
@@ -225,7 +230,7 @@ async function recordInteractive(sessionName, options = {}) {
       process.stdin.setRawMode(true);
     }
     process.stdin.resume();
-    process.stdin.on('data', (data) => {
+    process.stdin.on('data', (data: Buffer) => {
       // Ctrl+D 或 Ctrl+C 结束录制
       if (data[0] === 4 || data[0] === 3) {
         recorder.stop();
@@ -247,16 +252,20 @@ async function recordInteractive(sessionName, options = {}) {
 
 /**
  * 录制命令序列
- * 自动执行命令并录制
- * @param {string} sessionName 会话名称
- * @param {Array<string>} commands 命令列表
- * @param {Object} options 选项
  */
-async function recordCommands(sessionName, commands, options = {}) {
+async function recordCommands(
+  sessionName: string,
+  commands: string[],
+  options: Partial<Config> & {
+    waitAfter?: number;
+    delayBetween?: number;
+    initialDelay?: number;
+  } = {}
+): Promise<RecordingData> {
   return new Promise((resolve, reject) => {
     const recorder = new Recorder(options);
 
-    recorder.onStop = (recording) => {
+    recorder.onStop = (recording: RecordingData) => {
       resolve(recording);
     };
 
@@ -264,7 +273,7 @@ async function recordCommands(sessionName, commands, options = {}) {
     recorder.start(sessionName).then(() => {
       // 逐个执行命令
       let commandIndex = 0;
-      const executeNext = async () => {
+      const executeNext = async (): Promise<void> => {
         if (commandIndex >= commands.length) {
           // 所有命令执行完毕，等待一段时间后停止
           await delay(options.waitAfter || 1000);
@@ -278,29 +287,28 @@ async function recordCommands(sessionName, commands, options = {}) {
 
         // 等待命令执行
         await delay(options.delayBetween || 500);
-        executeNext();
+        await executeNext();
       };
 
       // 开始执行命令
-      setTimeout(executeNext, options.initialDelay || 500);
+      setTimeout(() => executeNext(), options.initialDelay || 500);
     }).catch(reject);
   });
 }
 
 /**
  * 检查 node-pty 是否可用
- * @returns {boolean}
  */
-function isPtyAvailable() {
+function isPtyAvailable(): boolean {
   try {
     require.resolve('node-pty');
     return true;
-  } catch (e) {
+  } catch {
     return false;
   }
 }
 
-module.exports = {
+export {
   Recorder,
   recordInteractive,
   recordCommands,

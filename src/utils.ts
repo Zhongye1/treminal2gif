@@ -2,15 +2,15 @@
  * 工具函数模块
  */
 
-const fs = require('fs');
-const path = require('path');
-const { defaultConfig } = require('./config');
+import * as fs from 'fs';
+import * as path from 'path';
+import { Frame, RecordingData, AnsiStyle, AnsiSegment } from './types';
+import { defaultConfig } from './config';
 
 /**
  * 确保目录存在
- * @param {string} dirPath 目录路径
  */
-function ensureDir(dirPath) {
+export function ensureDir(dirPath: string): void {
   if (!fs.existsSync(dirPath)) {
     fs.mkdirSync(dirPath, { recursive: true });
   }
@@ -18,10 +18,8 @@ function ensureDir(dirPath) {
 
 /**
  * 保存录制文件
- * @param {string} filePath 文件路径
- * @param {Object} data 录制数据
  */
-function saveRecording(filePath, data) {
+export function saveRecording(filePath: string, data: RecordingData): void {
   const dir = path.dirname(filePath);
   ensureDir(dir);
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
@@ -29,37 +27,31 @@ function saveRecording(filePath, data) {
 
 /**
  * 加载录制文件
- * @param {string} filePath 文件路径
- * @returns {Object} 录制数据
  */
-function loadRecording(filePath) {
+export function loadRecording(filePath: string): RecordingData {
   if (!fs.existsSync(filePath)) {
     throw new Error(`录制文件不存在: ${filePath}`);
   }
   const content = fs.readFileSync(filePath, 'utf-8');
-  return JSON.parse(content);
+  return JSON.parse(content) as RecordingData;
 }
 
 /**
  * 检查录制文件是否存在
- * @param {string} filePath 文件路径
- * @returns {boolean}
  */
-function recordingExists(filePath) {
+export function recordingExists(filePath: string): boolean {
   return fs.existsSync(filePath);
 }
 
 /**
  * 格式化时间戳为可读字符串
- * @param {number} timestamp 时间戳 (毫秒)
- * @returns {string}
  */
-function formatTimestamp(timestamp) {
+export function formatTimestamp(timestamp: number): string {
   const seconds = Math.floor(timestamp / 1000);
   const minutes = Math.floor(seconds / 60);
   const hours = Math.floor(minutes / 60);
 
-  const pad = (n) => n.toString().padStart(2, '0');
+  const pad = (n: number): string => n.toString().padStart(2, '0');
 
   if (hours > 0) {
     return `${hours}:${pad(minutes % 60)}:${pad(seconds % 60)}`;
@@ -69,10 +61,8 @@ function formatTimestamp(timestamp) {
 
 /**
  * 计算帧之间的延迟
- * @param {Array} frames 帧数组
- * @returns {Array} 带延迟的帧数组
  */
-function calculateDelays(frames) {
+export function calculateDelays(frames: Frame[]): Frame[] {
   if (frames.length === 0) return [];
 
   return frames.map((frame, index) => {
@@ -86,14 +76,12 @@ function calculateDelays(frames) {
 
 /**
  * 优化帧序列（移除空闲帧）
- * @param {Array} frames 帧数组
- * @param {number} maxIdleTime 最大空闲时间 (ms)
- * @returns {Array}
  */
-function optimizeFrames(frames, maxIdleTime = defaultConfig.recording.maxIdleTime) {
+export function optimizeFrames(frames: Frame[], maxIdleTime?: number): Frame[] {
+  const idleTime = maxIdleTime ?? defaultConfig.recording.maxIdleTime;
   if (frames.length === 0) return [];
 
-  const result = [];
+  const result: Frame[] = [];
   let lastContent = '';
 
   for (const frame of frames) {
@@ -104,8 +92,8 @@ function optimizeFrames(frames, maxIdleTime = defaultConfig.recording.maxIdleTim
     } else if (result.length > 0) {
       // 内容没变化，但可能需要更新延迟
       const lastFrame = result[result.length - 1];
-      if (frame.delay > maxIdleTime) {
-        lastFrame.delay = maxIdleTime;
+      if (frame.delay && frame.delay > idleTime) {
+        lastFrame.delay = idleTime;
       }
     }
   }
@@ -116,17 +104,16 @@ function optimizeFrames(frames, maxIdleTime = defaultConfig.recording.maxIdleTim
 /**
  * 解析 ANSI 颜色代码
  * 简化版本，提取颜色和样式信息
- * @param {string} text 包含 ANSI 代码的文本
- * @returns {Object} 解析后的数据
  */
-function parseAnsi(text) {
+export function parseAnsi(text: string): AnsiSegment[] {
   // ANSI 转义序列正则
   const ansiRegex = /\x1b\[([0-9;]*)m/g;
 
-  const segments = [];
+  const segments: AnsiSegment[] = [];
   let lastIndex = 0;
-  let match;
-  let currentStyle = {
+  let match: RegExpExecArray | null;
+  
+  const defaultStyle: AnsiStyle = {
     bold: false,
     dim: false,
     italic: false,
@@ -139,11 +126,13 @@ function parseAnsi(text) {
     bgColor: null,
   };
 
+  let currentStyle: AnsiStyle = { ...defaultStyle };
+
   // 保存当前文本段
-  const saveSegment = (text, style) => {
-    if (text.length > 0) {
+  const saveSegment = (txt: string, style: AnsiStyle): void => {
+    if (txt.length > 0) {
       segments.push({
-        text,
+        text: txt,
         style: { ...style },
       });
     }
@@ -159,18 +148,7 @@ function parseAnsi(text) {
     for (const code of codes) {
       if (code === 0) {
         // 重置所有样式
-        currentStyle = {
-          bold: false,
-          dim: false,
-          italic: false,
-          underline: false,
-          blink: false,
-          inverse: false,
-          hidden: false,
-          strikethrough: false,
-          fgColor: null,
-          bgColor: null,
-        };
+        currentStyle = { ...defaultStyle };
       } else if (code === 1) {
         currentStyle.bold = true;
       } else if (code === 2) {
@@ -199,10 +177,8 @@ function parseAnsi(text) {
       } else if (code >= 100 && code <= 107) {
         // 背景色 (亮色)
         currentStyle.bgColor = code - 100 + 8;
-      } else if (code === 38 || code === 48) {
-        // 256 色或真彩色 (简化处理)
-        // 跳过后续参数
       }
+      // 256 色和真彩色简化处理，跳过
     }
 
     lastIndex = match.index + match[0].length;
@@ -215,7 +191,7 @@ function parseAnsi(text) {
   // 移除其他控制字符
   const cleanSegments = segments.map((seg) => ({
     ...seg,
-    text: seg.text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, ''), // 移除其他 ANSI 序列
+    text: seg.text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, ''),
   }));
 
   return cleanSegments;
@@ -223,9 +199,8 @@ function parseAnsi(text) {
 
 /**
  * 获取终端尺寸
- * @returns {Object} { cols, rows }
  */
-function getTerminalSize() {
+export function getTerminalSize(): { cols: number; rows: number } {
   return {
     cols: process.stdout.columns || defaultConfig.terminal.cols,
     rows: process.stdout.rows || defaultConfig.terminal.rows,
@@ -234,26 +209,22 @@ function getTerminalSize() {
 
 /**
  * 延迟函数
- * @param {number} ms 毫秒
- * @returns {Promise}
  */
-function delay(ms) {
+export function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
  * 转义正则表达式特殊字符
- * @param {string} str 字符串
- * @returns {string}
  */
-function escapeRegex(str) {
+export function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**
  * 打印欢迎信息
  */
-function printWelcome() {
+export function printWelcome(): void {
   console.log('\n  treminal2gif - 终端录制转 GIF 工具\n');
   console.log('  命令:');
   console.log('    record <session-name>  录制终端会话');
@@ -265,9 +236,8 @@ function printWelcome() {
 
 /**
  * 打印录制信息
- * @param {Object} recording 录制数据
  */
-function printRecordingInfo(recording) {
+export function printRecordingInfo(recording: RecordingData): void {
   console.log('\n录制信息:');
   console.log(`  名称: ${recording.name}`);
   console.log(`  创建时间: ${new Date(recording.createdAt).toLocaleString()}`);
@@ -278,19 +248,3 @@ function printRecordingInfo(recording) {
     console.log(`  时长: ${formatTimestamp(duration)}`);
   }
 }
-
-module.exports = {
-  ensureDir,
-  saveRecording,
-  loadRecording,
-  recordingExists,
-  formatTimestamp,
-  calculateDelays,
-  optimizeFrames,
-  parseAnsi,
-  getTerminalSize,
-  delay,
-  escapeRegex,
-  printWelcome,
-  printRecordingInfo,
-};
