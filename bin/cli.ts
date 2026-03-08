@@ -6,11 +6,11 @@
  */
 
 import { Command } from 'commander';
-import { Chalk } from 'chalk';
 import * as path from 'path';
 import * as fs from 'fs';
 
-const chalk = new Chalk();
+// 使用 require 正确导入 chalk
+const chalk = require('chalk');
 
 import { defaultConfig, getRecordingPath, themes } from '../src/config';
 import { printWelcome, printRecordingInfo, recordingExists, loadRecording } from '../src';

@@ -564,14 +564,14 @@ class Renderer {
         let fgColor = colors.foreground || this.options.colors.foreground;
         if (segment.style.fgColor !== null) {
           const colorName = ANSI_COLORS[segment.style.fgColor];
-          fgColor = colors[colorName as keyof ColorScheme] || this.options.colors.foreground;
+          fgColor = colors[colorName] || this.options.colors.foreground;
         }
 
         // 获取背景色
         let bgColor = colors.background || this.options.colors.background;
         if (segment.style.bgColor !== null) {
           const colorName = ANSI_COLORS[segment.style.bgColor];
-          bgColor = colors[colorName as keyof ColorScheme] || this.options.colors.background;
+          bgColor = colors[colorName] || this.options.colors.background;
         }
 
         // 处理 inverse 样式
@@ -681,7 +681,7 @@ class Renderer {
       const frameDelays: number[] = [];
 
       for (let i = 0; i < frames.length; i++) {
-        const frame = frames[i]!;
+        const frame = frames[i];
         const delay = Math.max(minDelay, frame.delay || 100);
         frameDelays.push(Math.round(delay));
 
@@ -702,10 +702,10 @@ class Renderer {
             .removeAlpha() // 移除 alpha 通道
             .png({ compressionLevel: 6 }) // 重新压缩为 PNG
             .toBuffer();
-          fs.writeFileSync(framePath, rgbBuffer);
+          fs.writeFileSync(framePath, Uint8Array.from(rgbBuffer));
         } catch {
           // 如果没有 sharp，直接使用原始 buffer（可能仍有 alpha 问题）
-          fs.writeFileSync(framePath, buffer);
+          fs.writeFileSync(framePath, Uint8Array.from(buffer));
           if (i === 0) {
             console.warn('[WARN] sharp 未安装，建议安装以获得更好的 GIF 质量：npm install sharp');
           }
@@ -741,9 +741,9 @@ class Renderer {
           .removeAlpha()
           .png({ compressionLevel: 6 })
           .toBuffer();
-        fs.writeFileSync(endFramePath, rgbEndBuffer);
+        fs.writeFileSync(endFramePath, Uint8Array.from(rgbEndBuffer));
       } catch {
-        fs.writeFileSync(endFramePath, endBuffer);
+        fs.writeFileSync(endFramePath, Uint8Array.from(endBuffer));
       }
 
       // 添加 1500ms 的延迟
@@ -905,7 +905,7 @@ async function renderFramePreview(
 
   // 保存为 PNG（@napi-rs/canvas 使用 encode 方法）
   const buffer = await renderer.canvas!.encode('png');
-  fs.writeFileSync(outputPath, buffer);
+  fs.writeFileSync(outputPath, Uint8Array.from(buffer));
 
   return outputPath;
 }

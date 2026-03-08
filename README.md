@@ -26,9 +26,9 @@ git clone <repository-url>
 cd treminal2gif
 ```
 
-2. 安装依赖（使用bun）
+2. 安装依赖（使用npm）
 ```bash
-bun install
+npm install
 ```
 
 3. Windows 用户额外安装 GTK
@@ -41,13 +41,13 @@ bun install
 
 ```bash
 # 开始交互式录制
-bun run start record my-session
+npm run start record my-session
 
 # 指定终端尺寸
-bun run start record my-session --cols 100 --rows 30
+npm run start record my-session --cols 100 --rows 30
 
 # 录制特定命令
-bun run start record my-session --exec "ls -la && pwd"
+npm run start record my-session --exec "ls -la && pwd"
 ```
 
 录制完成后，按 `Ctrl+D` 或 `Ctrl+C` 结束录制。
@@ -56,57 +56,57 @@ bun run start record my-session --exec "ls -la && pwd"
 
 ```bash
 # 显示录制信息
-bun run start edit my-session --info
+npm run start edit my-session --info
 
 # 设置所有帧的延迟
-bun run start edit my-session --delay 100
+npm run start edit my-session --delay 100
 
 # 更改主题
-bun run start edit my-session --theme dracula
+npm run start edit my-session --theme dracula
 
 # 优化帧序列（移除空闲时间）
-bun run start edit my-session --optimize
+npm run start edit my-session --optimize
 
 # 保留特定帧范围
-bun run start edit my-session --keep 0-100
+npm run start edit my-session --keep 0-100
 
 # 删除特定帧范围
-bun run start edit my-session --delete 50-60
+npm run start edit my-session --delete 50-60
 ```
 
 ### 3. 渲染为 GIF
 
 ```bash
 # 渲染为 GIF
-bun run start render my-session
+npm run start render my-session
 
 # 指定输出路径
-bun run start render my-session --output ./output.gif
+npm run start render my-session --output ./output.gif
 
 # 设置帧率
-bun run start render my-session --fps 30
+npm run start render my-session --fps 30
 
 # 预览渲染（仅估算）
-bun run start render my-session --estimate
+npm run start render my-session --estimate
 ```
 
 ### 4. 其他命令
 
 ```bash
 # 列出所有录制
-bun run start list
+npm run start list
 
 # 显示详细信息
-bun run start list --detailed
+npm run start list --detailed
 
 # 显示当前配置
-bun run start config
+npm run start config
 
 # 列出可用主题
-bun run start config --themes
+npm run start config --themes
 
 # 删除录制
-bun run start delete my-session
+npm run start delete my-session
 ```
 
 ## 命令详解
